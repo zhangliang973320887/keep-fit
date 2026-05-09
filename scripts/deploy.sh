@@ -48,6 +48,23 @@ node_version_major() {
   node -v 2>/dev/null | sed 's/^v\([0-9]*\).*/\1/' || echo 0
 }
 
+# CentOS 7 / RHEL 7 ships with glibc 2.17. Node 18+ official binaries require
+# glibc 2.28+. For these legacy hosts, Node publishes "unofficial-builds"
+# linked against glibc 2.17 at unofficial-builds.nodejs.org.
+glibc_minor_version() {
+  # Output e.g. "2.17" → "17". Returns "999" if detection fails (assume modern).
+  local v
+  v=$(ldd --version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+' | head -n1 || true)
+  if [ -z "$v" ]; then echo "999"; return; fi
+  echo "${v#*.}"
+}
+
+needs_glibc217_build() {
+  local minor
+  minor=$(glibc_minor_version)
+  [ "$minor" -lt 28 ]
+}
+
 # Returns 0 if Node + npm both present and Node >= required version.
 node_ok() {
   command -v node >/dev/null 2>&1 || return 1
@@ -93,7 +110,8 @@ install_node_via_distro_pkg() {
   hash -r
 }
 
-# Last-resort: download a prebuilt binary from npmmirror.com to /opt and symlink.
+# Download a prebuilt binary to /opt and symlink. Picks the glibc-217 variant
+# automatically on legacy distros (CentOS 7 / RHEL 7).
 install_node_via_binary() {
   local arch
   arch=$(detect_arch)
@@ -101,11 +119,22 @@ install_node_via_binary() {
     echo "  ✗ Unsupported CPU architecture: $(uname -m)"
     return 1
   fi
-  local pkg="node-v${NODE_INSTALL_VERSION}-linux-${arch}"
-  local url="https://npmmirror.com/mirrors/node/v${NODE_INSTALL_VERSION}/${pkg}.tar.xz"
+
+  # Pick URL + filename based on glibc compatibility
+  local pkg url
+  if [ "$arch" = "x64" ] && needs_glibc217_build; then
+    echo "  Detected legacy glibc ($(ldd --version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+' | head -n1)) — using unofficial glibc-217 build"
+    pkg="node-v${NODE_INSTALL_VERSION}-linux-${arch}-glibc-217"
+    url="https://unofficial-builds.nodejs.org/download/release/v${NODE_INSTALL_VERSION}/${pkg}.tar.xz"
+  else
+    pkg="node-v${NODE_INSTALL_VERSION}-linux-${arch}"
+    url="https://npmmirror.com/mirrors/node/v${NODE_INSTALL_VERSION}/${pkg}.tar.xz"
+  fi
 
   echo "  Downloading $url"
   cd /opt
+  # Clean up any failed previous attempt
+  sudo_run rm -rf "${pkg}" "${pkg}.tar.xz"
   if ! sudo_run curl -fL --connect-timeout 15 --max-time 600 -O "$url"; then
     echo "  ✗ Download failed"
     cd - >/dev/null
@@ -118,6 +147,12 @@ install_node_via_binary() {
   sudo_run ln -sf "/opt/${pkg}/bin/npx"  /usr/local/bin/npx
   cd - >/dev/null
   hash -r
+
+  # Smoke test the binary actually runs on this kernel/glibc
+  if ! node -v >/dev/null 2>&1; then
+    echo "  ✗ Installed Node binary refuses to run (likely glibc/kernel mismatch)"
+    return 1
+  fi
 }
 
 # Some package repos (EPEL on CentOS 7) ship `nodejs` without `npm`.
