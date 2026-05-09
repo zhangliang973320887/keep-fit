@@ -148,6 +148,14 @@ install_node_via_binary() {
   cd - >/dev/null
   hash -r
 
+  # Persist /opt/<pkg>/bin in PATH for future shells so future global npm
+  # installs (e.g. pm2) become reachable without manual symlinking.
+  echo "export PATH=\"/opt/${pkg}/bin:\$PATH\"" \
+    | sudo_run tee /etc/profile.d/keepfit-node.sh >/dev/null
+  sudo_run chmod 0755 /etc/profile.d/keepfit-node.sh
+  # Make it active for *this* shell too
+  export PATH="/opt/${pkg}/bin:$PATH"
+
   # Smoke test the binary actually runs on this kernel/glibc
   if ! node -v >/dev/null 2>&1; then
     echo "  ✗ Installed Node binary refuses to run (likely glibc/kernel mismatch)"
@@ -232,6 +240,26 @@ ensure_pm2() {
   echo "==> Installing PM2 globally"
   npm install -g pm2
   hash -r
+
+  # If pm2 still isn't in PATH, find it and symlink into /usr/local/bin
+  if ! command -v pm2 >/dev/null 2>&1; then
+    local npm_prefix npm_bin
+    npm_prefix=$(npm prefix -g 2>/dev/null || true)
+    if [ -n "$npm_prefix" ]; then
+      npm_bin="${npm_prefix}/bin"
+      if [ -x "${npm_bin}/pm2" ]; then
+        echo "  Symlinking ${npm_bin}/pm2 → /usr/local/bin/pm2"
+        sudo_run ln -sf "${npm_bin}/pm2" /usr/local/bin/pm2
+        hash -r
+      fi
+    fi
+  fi
+
+  if ! command -v pm2 >/dev/null 2>&1; then
+    echo "  ✗ pm2 was installed but isn't on PATH."
+    echo "    Try: export PATH=\"$(npm prefix -g)/bin:\$PATH\" && pm2 -v"
+    exit 1
+  fi
   echo "  ✓ PM2 $(pm2 -v)"
 }
 
