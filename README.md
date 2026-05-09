@@ -77,8 +77,111 @@ app/                Next.js 路由
   workouts/         训练计划列表 / 新建 / 编辑（URL 路径，UI 显示为 Routines / 训练）
     [id]/run/       计时器 / 执行页
   history/          历史
+  manifest.ts       PWA manifest
 components/         UI 组件
 lib/                i18n、类型、storage、wger client
+public/             静态资源（icons, sw.js）
+scripts/            部署脚本
+ecosystem.config.js PM2 进程配置
+nginx.conf.example  Nginx 反向代理示例
+```
+
+## 部署到 Linux VPS / Deploy to Linux VPS
+
+> 已经准备好了 PM2 + 三个一键脚本。前提：服务器上有 Node 18+ 和 git。
+
+### 第一次部署
+
+```bash
+# 1. 把代码拉到服务器（任意目录）
+git clone <your-repo-url> ~/keep-fit
+cd ~/keep-fit
+
+# 2. 一键安装+构建+用 PM2 起来
+./scripts/deploy.sh
+```
+
+脚本会：
+1. 检查 Node 版本（< 18 直接拒绝并告诉你怎么装）
+2. 没 PM2 自动 `npm install -g pm2`
+3. `npm ci` 干净装依赖
+4. `npm run build` 生产构建
+5. `pm2 start ecosystem.config.js` 起进程，存到 `pm2 save`
+
+跑完应用就在 `http://localhost:3000`。
+
+### 开机自启
+
+部署完跑一次：
+
+```bash
+pm2 startup    # 复制粘贴它打印的那条 sudo 命令执行
+pm2 save
+```
+
+之后服务器重启 PM2 会自动把 keep-fit 拉起来。
+
+### 之后更新代码
+
+```bash
+cd ~/keep-fit
+./scripts/update.sh
+```
+
+脚本做的事：`git pull` → `npm ci` → `npm run build` → `pm2 reload`（零停机重载）。
+
+### 常用 PM2 命令
+
+```bash
+pm2 status keep-fit         # 看状态
+pm2 logs keep-fit           # 实时日志
+pm2 logs keep-fit --lines 200
+pm2 restart keep-fit        # 强制重启
+pm2 stop keep-fit           # 停掉
+pm2 delete keep-fit         # 卸载
+pm2 monit                   # 类似 htop 的实时监控
+```
+
+### 日志轮转
+
+防止日志撑爆磁盘：
+
+```bash
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 10M
+pm2 set pm2-logrotate:retain 7
+```
+
+### Nginx 反向代理 + HTTPS
+
+`nginx.conf.example` 里已经有现成模板。改完域名后：
+
+```bash
+sudo cp nginx.conf.example /etc/nginx/sites-available/keep-fit
+sudo vim /etc/nginx/sites-available/keep-fit  # 改 server_name
+sudo ln -s /etc/nginx/sites-available/keep-fit /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# Let's Encrypt 一键 HTTPS
+sudo certbot --nginx -d keepfit.example.com
+```
+
+### 健康检查
+
+```bash
+./scripts/healthcheck.sh   # 0=OK, 非 0=挂了
+```
+
+可塞进 cron 里 + 触发邮件/钉钉报警。
+
+### 防火墙
+
+只用 80/443，不直接暴露 3000：
+
+```bash
+sudo ufw allow 80
+sudo ufw allow 443
+sudo ufw enable
 ```
 
 ## License
