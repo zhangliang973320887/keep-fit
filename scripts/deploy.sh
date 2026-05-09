@@ -11,13 +11,15 @@ cd "$(dirname "$0")/.."
 
 APP_NAME="keep-fit"
 NODE_REQ_MAJOR=18
-NODE_INSTALL_VERSION="20.18.0"   # used for binary fallback
+NODE_INSTALL_VERSION="20.18.0"
 NPM_REGISTRY="https://registry.npmmirror.com"
 
 # ---------- helpers -----------------------------------------------------------
 
-# Use sudo only if not already root
-if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+# Wrap privileged calls; expand to nothing when already root.
+sudo_run() {
+  if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo -E "$@"; fi
+}
 
 detect_distro() {
   if   [ -f /etc/redhat-release ] || [ -f /etc/centos-release ] || [ -f /etc/system-release ]; then
@@ -42,34 +44,61 @@ detect_arch() {
   esac
 }
 
-install_node_via_package_manager() {
-  local distro="$1"
-  case "$distro" in
-    rhel)
-      curl -fsSL --connect-timeout 10 https://rpm.nodesource.com/setup_20.x | $SUDO -E bash -
-      $SUDO yum install -y nodejs
-      ;;
-    debian)
-      curl -fsSL --connect-timeout 10 https://deb.nodesource.com/setup_20.x | $SUDO -E bash -
-      $SUDO apt-get install -y nodejs
-      ;;
-    alpine)
-      $SUDO apk add --update nodejs npm
-      ;;
-    arch)
-      $SUDO pacman -Sy --noconfirm nodejs npm
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+node_version_major() {
+  node -v 2>/dev/null | sed 's/^v\([0-9]*\).*/\1/' || echo 0
 }
 
+# Returns 0 if Node + npm both present and Node >= required version.
+node_ok() {
+  command -v node >/dev/null 2>&1 || return 1
+  command -v npm  >/dev/null 2>&1 || return 1
+  local major
+  major=$(node_version_major)
+  [ "$major" -ge "$NODE_REQ_MAJOR" ]
+}
+
+# Try NodeSource setup script + package install. Verifies version afterwards.
+install_node_via_nodesource() {
+  local distro="$1"
+  local setup_url
+  case "$distro" in
+    rhel)   setup_url="https://rpm.nodesource.com/setup_20.x" ;;
+    debian) setup_url="https://deb.nodesource.com/setup_20.x" ;;
+    *)      return 1 ;;
+  esac
+
+  echo "  Trying NodeSource via package manager…"
+  local script
+  if ! script=$(curl -fsSL --connect-timeout 10 --max-time 30 "$setup_url"); then
+    echo "  ! NodeSource setup script could not be fetched (network issue?)"
+    return 1
+  fi
+  echo "$script" | sudo_run bash - || return 1
+
+  case "$distro" in
+    rhel)   sudo_run yum install -y nodejs || return 1 ;;
+    debian) sudo_run apt-get install -y nodejs || return 1 ;;
+  esac
+  hash -r
+  return 0
+}
+
+install_node_via_distro_pkg() {
+  local distro="$1"
+  case "$distro" in
+    alpine) sudo_run apk add --update nodejs npm ;;
+    arch)   sudo_run pacman -Sy --noconfirm nodejs npm ;;
+    *)      return 1 ;;
+  esac
+  hash -r
+}
+
+# Last-resort: download a prebuilt binary from npmmirror.com to /opt and symlink.
 install_node_via_binary() {
   local arch
   arch=$(detect_arch)
   if [ "$arch" = "unsupported" ]; then
-    echo "✗ Unsupported CPU architecture: $(uname -m)"
+    echo "  ✗ Unsupported CPU architecture: $(uname -m)"
     return 1
   fi
   local pkg="node-v${NODE_INSTALL_VERSION}-linux-${arch}"
@@ -77,24 +106,43 @@ install_node_via_binary() {
 
   echo "  Downloading $url"
   cd /opt
-  curl -fL --connect-timeout 15 -O "$url"
-  tar -xf "${pkg}.tar.xz"
-  rm -f "${pkg}.tar.xz"
-  $SUDO ln -sf "/opt/${pkg}/bin/node" /usr/local/bin/node
-  $SUDO ln -sf "/opt/${pkg}/bin/npm"  /usr/local/bin/npm
-  $SUDO ln -sf "/opt/${pkg}/bin/npx"  /usr/local/bin/npx
+  if ! sudo_run curl -fL --connect-timeout 15 --max-time 600 -O "$url"; then
+    echo "  ✗ Download failed"
+    cd - >/dev/null
+    return 1
+  fi
+  sudo_run tar -xf "${pkg}.tar.xz"
+  sudo_run rm -f "${pkg}.tar.xz"
+  sudo_run ln -sf "/opt/${pkg}/bin/node" /usr/local/bin/node
+  sudo_run ln -sf "/opt/${pkg}/bin/npm"  /usr/local/bin/npm
+  sudo_run ln -sf "/opt/${pkg}/bin/npx"  /usr/local/bin/npx
   cd - >/dev/null
+  hash -r
+}
+
+# Some package repos (EPEL on CentOS 7) ship `nodejs` without `npm`.
+# If that happened, try to install npm separately.
+ensure_npm_present() {
+  if command -v npm >/dev/null 2>&1; then return 0; fi
+  echo "  ! Node installed but npm is missing — trying to install separately"
+  local distro
+  distro=$(detect_distro)
+  case "$distro" in
+    rhel)   sudo_run yum install -y npm 2>/dev/null || true ;;
+    debian) sudo_run apt-get install -y npm 2>/dev/null || true ;;
+  esac
+  hash -r
+  command -v npm >/dev/null 2>&1
 }
 
 ensure_node() {
+  if node_ok; then
+    echo "  ✓ Node $(node -v), npm $(npm -v)"
+    return 0
+  fi
+
   if command -v node >/dev/null 2>&1; then
-    local node_major
-    node_major=$(node -v | sed 's/^v\([0-9]*\).*/\1/')
-    if [ "$node_major" -ge "$NODE_REQ_MAJOR" ]; then
-      echo "  ✓ Node $(node -v)"
-      return 0
-    fi
-    echo "  ! Node $(node -v) is too old (need ${NODE_REQ_MAJOR}+)."
+    echo "  ! Found Node $(node -v) but it's too old / missing npm. Will replace."
   else
     echo "  ! Node.js not installed."
   fi
@@ -108,21 +156,37 @@ ensure_node() {
   distro=$(detect_distro)
   echo "==> Auto-installing Node ${NODE_INSTALL_VERSION%%.*} on ${distro}"
 
-  # Try package manager first
-  if install_node_via_package_manager "$distro"; then
-    echo "  ✓ Installed via package manager"
-  else
-    echo "  ! Package manager install failed/unavailable — falling back to npmmirror binary"
-    install_node_via_binary
+  # Strategy 1: NodeSource (newest Node, but needs network to deb/rpm.nodesource.com)
+  if [ "$distro" = "rhel" ] || [ "$distro" = "debian" ]; then
+    if install_node_via_nodesource "$distro" && node_ok; then
+      echo "  ✓ Installed via NodeSource"
+      return 0
+    fi
+    echo "  ! NodeSource path didn't yield Node ${NODE_REQ_MAJOR}+ — trying npm fix-up"
+    if ensure_npm_present && node_ok; then
+      echo "  ✓ Installed via NodeSource (npm filled in)"
+      return 0
+    fi
+    echo "  ! Falling back to binary install"
   fi
 
-  # Re-check
-  if ! command -v node >/dev/null 2>&1; then
-    echo "✗ Node install failed. Try installing manually."
-    exit 1
+  # Strategy 2: Distro built-in (Alpine / Arch — usually fresh enough)
+  if [ "$distro" = "alpine" ] || [ "$distro" = "arch" ]; then
+    if install_node_via_distro_pkg "$distro" && node_ok; then
+      echo "  ✓ Installed via distro package manager"
+      return 0
+    fi
+    echo "  ! Distro package didn't yield Node ${NODE_REQ_MAJOR}+ — falling back to binary"
   fi
-  hash -r
-  echo "  ✓ Node $(node -v) ready"
+
+  # Strategy 3: Download prebuilt binary from npmmirror (no version mismatch risk)
+  if install_node_via_binary && node_ok; then
+    echo "  ✓ Installed via binary download (npmmirror)"
+    return 0
+  fi
+
+  echo "✗ Could not install a working Node ${NODE_REQ_MAJOR}+. See errors above."
+  exit 1
 }
 
 ensure_pm2() {
@@ -143,8 +207,6 @@ echo "==> Keep Fit deploy"
 ensure_node
 ensure_pm2
 
-# Configure npm registry to a fast mirror for the install step.
-# Persisted only for this project (uses .npmrc in cwd if present, else respects user config).
 if ! grep -q "registry=" .npmrc 2>/dev/null; then
   echo "==> Setting npm registry to ${NPM_REGISTRY}"
   npm config set registry "$NPM_REGISTRY"
