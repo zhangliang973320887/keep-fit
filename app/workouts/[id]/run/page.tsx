@@ -11,6 +11,9 @@ import { cancel as cancelSpeech, setMuted as setSpeechMuted, speak, warmUp } fro
 import { cues, setSoundPack, SOUND_PACKS, unlock as unlockAudio } from "@/lib/audio-cues";
 import { acquire as acquireWakeLock, release as releaseWakeLock } from "@/lib/wake-lock";
 import { isSupported as voiceCtlSupported, listen as listenVoice, type VoiceListener } from "@/lib/voice-control";
+import { VIDEO_DURATION_SEC } from "@/lib/video-manifest";
+
+const SPEED_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0] as const;
 
 type Phase = "idle" | "preparing" | "active" | "rest" | "done";
 
@@ -43,7 +46,10 @@ export default function RunPage({ params }: { params: { id: string } }) {
     voiceControlEnabled: false,
     prepareSeconds: 10,
     soundPackId: "gym",
+    videoEnabled: true,
+    videoSpeedMultiplier: 1.0,
   }));
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const startedAtRef = useRef<number>(Date.now());
   const completedSetsRef = useRef<{ exerciseId: string; exerciseName: string; sets: number }[]>(
     [],
@@ -152,6 +158,24 @@ export default function RunPage({ params }: { params: { id: string } }) {
     const id = window.setInterval(() => cues.tempoBeep(), interval);
     return () => window.clearInterval(id);
   }, [phase, paused, settings.beatEnabled, currentEx]);
+
+  // Video playback control — auto-sync playback rate to user's secondsPerRep,
+  // multiplied by their manual speed override. Also pause/resume to match phase.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !currentEx?.videoUrl || !settings.videoEnabled) return;
+    if (phase === "active" && !paused) {
+      const tempo = currentEx.isTimeBased
+        ? 1
+        : VIDEO_DURATION_SEC / Math.max(1, currentEx.secondsPerRep ?? 3);
+      video.playbackRate = tempo * settings.videoSpeedMultiplier;
+      video.play().catch(() => {
+        // browsers throw if not in a user gesture; silently ignore
+      });
+    } else {
+      video.pause();
+    }
+  }, [phase, paused, currentEx, settings.videoSpeedMultiplier, settings.videoEnabled]);
 
   const announceExercise = useCallback(
     (ex: WorkoutExercise, secondsBefore: number) => {
@@ -383,18 +407,23 @@ export default function RunPage({ params }: { params: { id: string } }) {
 
           <div className="space-y-2">
             <Toggle
-              label={t("voiceOn")}
+              label={`🎬 ${t("videoMode")}`}
+              checked={settings.videoEnabled}
+              onChange={(v) => updateSettings({ videoEnabled: v })}
+            />
+            <Toggle
+              label={`🔊 ${t("voiceOn")}`}
               checked={settings.voiceEnabled}
               onChange={(v) => updateSettings({ voiceEnabled: v })}
             />
             <Toggle
-              label={t("beatOn")}
+              label={`🎵 ${t("beatOn")}`}
               checked={settings.beatEnabled}
               onChange={(v) => updateSettings({ beatEnabled: v })}
             />
             {voiceCtlSupported() && (
               <Toggle
-                label={t("micOn")}
+                label={`🎤 ${t("micOn")}`}
                 checked={settings.voiceControlEnabled}
                 onChange={(v) => updateSettings({ voiceControlEnabled: v })}
               />
@@ -492,8 +521,19 @@ export default function RunPage({ params }: { params: { id: string } }) {
               : "border-brand-300 ring-1 ring-brand-300/40"
         }`}
       >
-        <div className="aspect-video bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden flex items-center justify-center mb-4">
-          {currentEx.imageUrl ? (
+        <div className="aspect-video bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden flex items-center justify-center mb-4 relative">
+          {currentEx.videoUrl && settings.videoEnabled ? (
+            <video
+              ref={videoRef}
+              src={currentEx.videoUrl}
+              poster={currentEx.imageUrl ?? undefined}
+              className="w-full h-full object-contain"
+              loop
+              muted
+              playsInline
+              preload="auto"
+            />
+          ) : currentEx.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={currentEx.imageUrl}
@@ -502,6 +542,17 @@ export default function RunPage({ params }: { params: { id: string } }) {
             />
           ) : (
             <span className="text-6xl opacity-30">🏋️</span>
+          )}
+          {currentEx.videoUrl && settings.videoEnabled && phase === "active" && !paused && (
+            <span className="absolute top-2 right-2 text-[10px] px-2 py-0.5 rounded-full bg-black/60 text-white font-mono">
+              {(
+                (currentEx.isTimeBased
+                  ? 1
+                  : VIDEO_DURATION_SEC / Math.max(1, currentEx.secondsPerRep ?? 3)) *
+                settings.videoSpeedMultiplier
+              ).toFixed(2)}
+              ×
+            </span>
           )}
         </div>
         <h2 className="text-2xl font-bold">
@@ -569,6 +620,22 @@ export default function RunPage({ params }: { params: { id: string } }) {
       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 space-y-2">
         <div className="flex items-center gap-2">
           <button
+            onClick={() =>
+              updateSettings({ videoEnabled: !settings.videoEnabled })
+            }
+            className={`flex-1 px-3 py-2 rounded-full border text-sm transition ${
+              settings.videoEnabled
+                ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-900/30"
+                : "border-slate-300 dark:border-slate-700 text-slate-500"
+            }`}
+            title={
+              settings.videoEnabled ? t("videoMode") : t("imageMode")
+            }
+          >
+            {settings.videoEnabled ? "🎬" : "🖼"}{" "}
+            {settings.videoEnabled ? t("videoMode") : t("imageMode")}
+          </button>
+          <button
             onClick={() => {
               unlockAudio();
               const next = !settings.voiceEnabled;
@@ -587,7 +654,6 @@ export default function RunPage({ params }: { params: { id: string } }) {
               unlockAudio();
               const next = !settings.beatEnabled;
               updateSettings({ beatEnabled: next });
-              // Audible confirmation when turning on
               if (next) cues.tempoBeep();
             }}
             className={`flex-1 px-3 py-2 rounded-full border text-sm transition ${
@@ -622,6 +688,33 @@ export default function RunPage({ params }: { params: { id: string } }) {
             </button>
           ))}
         </div>
+
+        {/* Video speed override — only shown when current exercise has a video AND mode is on */}
+        {currentEx.videoUrl && settings.videoEnabled && (
+          <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs text-slate-500">▶ {t("videoSpeed")}</span>
+              <span className="text-[10px] text-slate-400">
+                {settings.videoSpeedMultiplier === 1 ? t("videoSpeedAuto") : `${settings.videoSpeedMultiplier}×`}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 justify-center">
+              {SPEED_PRESETS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => updateSettings({ videoSpeedMultiplier: s })}
+                  className={`px-2.5 py-1 rounded-full border text-xs transition ${
+                    settings.videoSpeedMultiplier === s
+                      ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-900/30"
+                      : "border-slate-300 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  {s}×
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="text-center pt-2">

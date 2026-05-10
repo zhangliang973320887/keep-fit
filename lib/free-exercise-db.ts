@@ -2,6 +2,7 @@
 // Single static JSON of 873 exercises, every one has 2 illustration images.
 // Served via jsDelivr CDN — no auth, no rate limits in practice.
 import type { Exercise } from "./types";
+import { getVideoUrl } from "./video-manifest";
 
 const DATA_URL =
   "https://cdn.jsdelivr.net/gh/yuhonas/free-exercise-db@main/dist/exercises.json";
@@ -75,6 +76,7 @@ function normalize(raw: RawExercise): Exercise {
     equipment: raw.equipment ? [raw.equipment] : [],
     imageUrl: images[0] ?? null,
     imageUrls: images,
+    videoUrl: getVideoUrl(raw.id),
   };
 }
 

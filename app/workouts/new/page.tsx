@@ -15,6 +15,7 @@ function exerciseToWorkoutExercise(e: Exercise): WorkoutExercise {
     exerciseId: e.id,
     exerciseName: e.name,
     imageUrl: e.imageUrl,
+    videoUrl: e.videoUrl ?? null,
     sets: 3,
     reps: 10,
     isTimeBased: false,

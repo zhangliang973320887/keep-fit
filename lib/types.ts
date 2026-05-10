@@ -17,6 +17,7 @@ export interface Exercise {
   equipment: string[]; // equipment names (raw EN keys)
   imageUrl: string | null;
   imageUrls: string[];
+  videoUrl: string | null; // optional follow-along video (one rep loopable)
 }
 
 // User-built workout plan, persisted in localStorage.
@@ -24,6 +25,7 @@ export interface WorkoutExercise {
   exerciseId: string;
   exerciseName: string;
   imageUrl: string | null;
+  videoUrl?: string | null; // optional follow-along video URL
   sets: number;
   reps: number; // for time-based exercises, treat as seconds (toggle below)
   isTimeBased: boolean;
@@ -38,6 +40,12 @@ export interface AppSettings {
   voiceControlEnabled: boolean;
   prepareSeconds: number; // pre-workout countdown, default 10
   soundPackId: string; // ID of the audio cue pack, e.g. "gym"
+  // When true and the exercise has a videoUrl, use video for follow-along.
+  // When false, force static image even if video is available.
+  videoEnabled: boolean;
+  // Video playback speed multiplier (applied on top of the auto sync rate).
+  // 1.0 = follow secondsPerRep exactly. 0.5 = slow-mo. 2.0 = fast forward.
+  videoSpeedMultiplier: number;
 }
 
 export interface Workout {

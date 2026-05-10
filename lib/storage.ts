@@ -12,6 +12,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   voiceControlEnabled: false,
   prepareSeconds: 10,
   soundPackId: "gym",
+  videoEnabled: true,
+  videoSpeedMultiplier: 1.0,
 };
 
 function safeGet<T>(key: string, fallback: T): T {
