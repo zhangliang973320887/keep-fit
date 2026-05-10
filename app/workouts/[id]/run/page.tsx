@@ -12,6 +12,9 @@ import { cues, setSoundPack, SOUND_PACKS, unlock as unlockAudio } from "@/lib/au
 import { acquire as acquireWakeLock, release as releaseWakeLock } from "@/lib/wake-lock";
 import { isSupported as voiceCtlSupported, listen as listenVoice, type VoiceListener } from "@/lib/voice-control";
 import { VIDEO_DURATION_SEC } from "@/lib/video-manifest";
+import MuscleHighlight from "@/components/MuscleHighlight";
+import { loadExercises } from "@/lib/wger";
+import type { Exercise } from "@/lib/types";
 
 const SPEED_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0] as const;
 
@@ -50,6 +53,9 @@ export default function RunPage({ params }: { params: { id: string } }) {
     videoSpeedMultiplier: 1.0,
   }));
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Keep a lookup of full Exercise data so we can render muscle highlights
+  // (WorkoutExercise stores only minimal info to keep localStorage small).
+  const [exerciseLookup, setExerciseLookup] = useState<Record<string, Exercise>>({});
   const startedAtRef = useRef<number>(Date.now());
   const completedSetsRef = useRef<{ exerciseId: string; exerciseName: string; sets: number }[]>(
     [],
@@ -66,6 +72,16 @@ export default function RunPage({ params }: { params: { id: string } }) {
     setWorkout(w);
     setSettingsState(getSettings());
     startedAtRef.current = Date.now();
+    // Async-load full exercise data so we have muscle info for highlighting
+    loadExercises()
+      .then((all) => {
+        const map: Record<string, Exercise> = {};
+        for (const e of all) map[e.id] = e;
+        setExerciseLookup(map);
+      })
+      .catch(() => {
+        /* ignore — degrades to no highlight */
+      });
   }, [params.id, router]);
 
   // Sync mute state with voice setting
@@ -558,6 +574,29 @@ export default function RunPage({ params }: { params: { id: string } }) {
         <h2 className="text-2xl font-bold">
           {localizeName(currentEx.exerciseName, lang)}
         </h2>
+
+        {/* Muscle highlight — small figure pair under the title */}
+        {(() => {
+          const ex = exerciseLookup[currentEx.exerciseId];
+          if (!ex) return null;
+          if (ex.muscles.length === 0 && ex.musclesSecondary.length === 0) return null;
+          // Pulse the highlight in time with the rep tempo, but only during
+          // active rep-based work (not preparing, rest, or time-based holds).
+          const pulse =
+            phase === "active" && !paused && !currentEx.isTimeBased
+              ? Math.max(1, currentEx.secondsPerRep ?? 3)
+              : undefined;
+          return (
+            <div className="mt-3 -mb-1">
+              <MuscleHighlight
+                primary={ex.muscles}
+                secondary={ex.musclesSecondary}
+                size={140}
+                pulseSeconds={pulse}
+              />
+            </div>
+          );
+        })()}
 
         {phase === "preparing" && (
           <div className="mt-4 text-center">

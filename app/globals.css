@@ -25,3 +25,19 @@ input[type="number"]::-webkit-inner-spin-button {
 input[type="number"] {
   -moz-appearance: textfield;
 }
+
+/* Muscle highlight breathing pulse — period set by `--pulse-duration` inline style.
+   Loops opacity 0.65 → 1 → 0.65, matching one rep cycle. */
+@keyframes muscle-pulse {
+  0%   { opacity: 0.55; }
+  45%  { opacity: 1; }
+  100% { opacity: 0.55; }
+}
+.muscle-pulse {
+  animation: muscle-pulse var(--pulse-duration, 3s) ease-in-out infinite;
+}
+.muscle-pulse-secondary {
+  animation: muscle-pulse var(--pulse-duration, 3s) ease-in-out infinite;
+  animation-delay: 0.3s;
+  opacity: 0.4;
+}

@@ -68,22 +68,90 @@ JSON.parse(localStorage.getItem('mwc.exercises.cache.v2'))
 
 同一文件里还有 `categoryZH` / `muscleZH` / `equipmentZH`，分类、肌群、器械的翻译已经全量覆盖。
 
+## 解剖肌肉高亮 / Muscle anatomy renders
+
+训练页和动作详情弹窗里那对小人偶（前+后视图，红色高亮当前动作激活的肌肉）来自一次性渲染好的 PNG 集合。
+
+**资源**：`public/muscle-anatomy/` 下 70 张 PNG（约 5 MB）：
+- `base-{front,back}.png` —— 灰色全身底图
+- `<group>-{front,back}.png` —— 灰色全身 + 一组肌肉染红
+- `<group>-{front,back}-overlay.png` —— 透明背景，仅红色肌肉（用于多肌群叠加）
+
+`<group>` 是 17 个肌肉键之一：abdominals / abductors / adductors / biceps / calves / chest / forearms / glutes / hamstrings / lats / lower_back / middle_back / neck / quadriceps / shoulders / traps / triceps。
+
+**数据源**：[Z-Anatomy](https://www.z-anatomy.com/)（CC-BY-SA 4.0，作者 Lluís Vinent Juanico）—— 一个开源的 Blender 解剖模型，约 290 MB 的 .blend 文件，包含 894 个独立肌肉网格。
+
+### 重新渲染（可选）
+
+如果想换风格、改颜色、加新肌肉组，需要本地装 Blender + 拿到 Z-Anatomy 文件：
+
+```bash
+# 1. 下载 Z-Anatomy
+#    去 z-anatomy.com 或 Google Drive 链接（README 里有），下载 Z-Anatomy_Template.zip
+#    解压两层 ZIP 后得到 ~290MB 的 Startup.blend
+
+# 2. 在 Blender 里打开
+#    File → Open → Startup.blend
+
+# 3. 跑渲染脚本
+#    Blender 顶部菜单切到 "Scripting" workspace
+#    点 "Open" → 选 scripts/blender/zanatomy-render.py
+#    点 "Run Script" 按钮
+#    或命令行：
+#    blender Startup.blend --python scripts/blender/zanatomy-render.py
+
+# 4. 等渲染（~5-10 分钟，看 GPU）
+# 5. 70 张 PNG 自动写到 public/muscle-anatomy/，前端立刻可用
+```
+
+### 加新肌肉组
+
+1. 编辑 `scripts/blender/zanatomy-render.py` 顶部的 `CURATED` 字典，加新的 key + 对应 Z-Anatomy mesh 名字
+2. 删掉 `scripts/blender/zanatomy-muscle-map.json`（让脚本重建）
+3. 跑一遍渲染（也可以只跑增量，编辑 main() 跳过已有的 group）
+4. 在 `components/MuscleHighlight.tsx` 的 `MUSCLE_TO_SLUG` 表里加映射
+5. 在 `lib/exercise-translations.ts` 的 muscleZH 表里加中文
+
+### 改风格
+
+- **红色更鲜艳/暖**：`zanatomy-render.py` 顶部 `mat_red.diffuse_color = (0.9, 0.15, 0.15, 1.0)` → 改成你的颜色
+- **骨头颜色**：`mat_bone` 默认 `(0.92, 0.90, 0.84, 1.0)` 米白色
+- **背景换成深色**：`scene.render.film_transparent = False` + 设 world background
+- **改光照风格**：`scene.display.shading.light = "STUDIO"` → `"FLAT"` / `"MATCAP"`
+- **更高分辨率**：`RES_X, RES_Y = 400, 600` → 800, 1200
+- **回到透视相机**（不推荐，会出现腿短头大）：`USE_ORTHOGRAPHIC = False`
+- **改正交画幅**：`ORTHO_SCALE = 1.85` 相当于相机能看到的垂直高度（米）；调大显得更小/留白多
+- **加更多颅骨细节**：`SKULL_BONE_PATTERNS` 加 `"Sphenoid"` / `"Ethmoid"` / `"Vomer"` / `"Hyoid"` 等
+
+### 节拍呼吸动画
+
+跟练训练时（active 阶段、按次数动作），高亮肌肉会按 `secondsPerRep` 节奏脉动透明度，CSS 动画在 `app/globals.css` 里的 `@keyframes muscle-pulse`。代码层在 `components/MuscleHighlight.tsx` 的 `pulseSeconds` prop。
+
 ## 文件结构 / Layout
 
 ```
 app/                Next.js 路由
   page.tsx          首页
   exercises/        动作库
-  workouts/         训练计划列表 / 新建 / 编辑（URL 路径，UI 显示为 Routines / 训练）
+  workouts/         训练计划列表 / 新建 / 编辑
     [id]/run/       计时器 / 执行页
   history/          历史
   manifest.ts       PWA manifest
-components/         UI 组件
-lib/                i18n、类型、storage、wger client
-public/             静态资源（icons, sw.js）
-scripts/            部署脚本
-ecosystem.config.js PM2 进程配置
-nginx.conf.example  Nginx 反向代理示例
+components/         UI 组件（含 MuscleHighlight）
+lib/                i18n、类型、storage、free-exercise-db client、speech、audio-cues
+public/             静态资源
+  muscle-anatomy/   Z-Anatomy 渲染的 70 张 PNG
+  exercise-videos/  Seedance 生成的动作视频（按需）
+  icon.svg / sw.js  PWA 资源
+scripts/
+  export-exercises.mjs    导出 873 个动作的元数据
+  seedance-batch.mjs      批量调 Seedance API 生成视频
+  blender/
+    zanatomy-render.py            Z-Anatomy → 肌肉高亮 PNG 的渲染脚本
+    zanatomy-muscle-map.json      17 肌肉键 → Z-Anatomy mesh 名字的映射
+  deploy.sh / update.sh   服务器部署脚本（PM2）
+ecosystem.config.js       PM2 配置
+nginx.conf.example        Nginx 反向代理示例
 ```
 
 ## 部署到 Linux VPS / Deploy to Linux VPS

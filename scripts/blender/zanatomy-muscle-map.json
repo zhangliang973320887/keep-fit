@@ -1,0 +1,168 @@
+{
+  "resolved": {
+    "abdominals": [
+      "External abdominal oblique muscle.l",
+      "External abdominal oblique muscle.r",
+      "Internal abdominal oblique muscle.l",
+      "Internal abdominal oblique muscle.r",
+      "Rectus abdominis muscle.l",
+      "Rectus abdominis muscle.r",
+      "Transversus abdominis muscle.l",
+      "Transversus abdominis muscle.r"
+    ],
+    "abductors": [
+      "Gluteus medius muscle.l",
+      "Gluteus medius muscle.r",
+      "Gluteus minimus muscle.l",
+      "Gluteus minimus muscle.r",
+      "Tensor fasciae latae.l",
+      "Tensor fasciae latae.r"
+    ],
+    "adductors": [
+      "Adductor brevis.l",
+      "Adductor brevis.r",
+      "Adductor longus.l",
+      "Adductor longus.r",
+      "Adductor magnus.l",
+      "Adductor magnus.r",
+      "Gracilis muscle.l",
+      "Gracilis muscle.r",
+      "Pectineus muscle.l",
+      "Pectineus muscle.r"
+    ],
+    "biceps": [
+      "Long head of biceps brachii.l",
+      "Long head of biceps brachii.r",
+      "Short head of biceps brachii.l",
+      "Short head of biceps brachii.r"
+    ],
+    "calves": [
+      "Lateral head of gastrocnemius.l",
+      "Lateral head of gastrocnemius.r",
+      "Medial head of gastrocnemius.l",
+      "Medial head of gastrocnemius.r",
+      "Soleus muscle.l",
+      "Soleus muscle.r"
+    ],
+    "chest": [
+      "Clavicular head of pectoralis major muscle.l",
+      "Clavicular head of pectoralis major muscle.r",
+      "Pectoralis minor muscle.l",
+      "Pectoralis minor muscle.r",
+      "Sternocostal head of pectoralis major muscle.l",
+      "Sternocostal head of pectoralis major muscle.r"
+    ],
+    "forearms": [
+      "Brachioradialis muscle.l",
+      "Brachioradialis muscle.r",
+      "Extensor carpi radialis brevis.l",
+      "Extensor carpi radialis brevis.r",
+      "Extensor carpi radialis longus.l",
+      "Extensor carpi radialis longus.r",
+      "Extensor digitorum.l",
+      "Extensor digitorum.r",
+      "Flexor carpi radialis.l",
+      "Flexor carpi radialis.r",
+      "Pronator quadratus.l",
+      "Pronator quadratus.r",
+      "Supinator.l",
+      "Supinator.r"
+    ],
+    "glutes": [
+      "Gluteus maximus muscle.l",
+      "Gluteus maximus muscle.r"
+    ],
+    "hamstrings": [
+      "Long head of biceps femoris.l",
+      "Long head of biceps femoris.r",
+      "Semimembranosus muscle.l",
+      "Semimembranosus muscle.r",
+      "Semitendinosus muscle.l",
+      "Semitendinosus muscle.r",
+      "Short head of biceps femoris.l",
+      "Short head of biceps femoris.r"
+    ],
+    "lats": [
+      "Latissimus dorsi muscle.l",
+      "Latissimus dorsi muscle.r",
+      "Teres major muscle.l",
+      "Teres major muscle.r"
+    ],
+    "lower back": [
+      "Multifidus lumborum muscle.l",
+      "Multifidus lumborum muscle.r"
+    ],
+    "middle back": [
+      "Infraspinatus muscle.l",
+      "Infraspinatus muscle.r",
+      "Rhomboid major muscle.l",
+      "Rhomboid major muscle.r",
+      "Rhomboid minor muscle.l",
+      "Rhomboid minor muscle.r",
+      "Teres minor muscle.l",
+      "Teres minor muscle.r"
+    ],
+    "neck": [
+      "Splenius capitis muscle.l",
+      "Splenius capitis muscle.r",
+      "Splenius colli muscle.l",
+      "Splenius colli muscle.r",
+      "Sternocleidomastoid muscle.l",
+      "Sternocleidomastoid muscle.r"
+    ],
+    "quadriceps": [
+      "Rectus femoris muscle.l",
+      "Rectus femoris muscle.r",
+      "Sartorius muscle.l",
+      "Sartorius muscle.r",
+      "Vastus intermedius muscle.l",
+      "Vastus intermedius muscle.r",
+      "Vastus lateralis muscle.l",
+      "Vastus lateralis muscle.r",
+      "Vastus medialis muscle.l",
+      "Vastus medialis muscle.r"
+    ],
+    "shoulders": [
+      "Acromial part of deltoid muscle.l",
+      "Acromial part of deltoid muscle.r",
+      "Clavicular part of deltoid muscle.l",
+      "Clavicular part of deltoid muscle.r"
+    ],
+    "traps": [
+      "Ascending part of trapezius muscle.l",
+      "Ascending part of trapezius muscle.r",
+      "Descending part of trapezius muscle.l",
+      "Descending part of trapezius muscle.r",
+      "Transverse part of trapezius muscle.l",
+      "Transverse part of trapezius muscle.r"
+    ],
+    "triceps": [
+      "Lateral head of triceps brachii.l",
+      "Lateral head of triceps brachii.r",
+      "Long head of triceps brachii.l",
+      "Long head of triceps brachii.r",
+      "Medial head of triceps brachii.l",
+      "Medial head of triceps brachii.r"
+    ]
+  },
+  "unresolved": {
+    "chest": [
+      "Pectoralis major muscle"
+    ],
+    "forearms": [
+      "Flexor carpi ulnaris",
+      "Flexor digitorum superficialis",
+      "Extensor carpi ulnaris",
+      "Pronator teres",
+      "Palmaris longus"
+    ],
+    "lower back": [
+      "Quadratus lumborum",
+      "Iliocostalis lumborum",
+      "Longissimus thoracis"
+    ],
+    "shoulders": [
+      "Spinal part of deltoid muscle"
+    ]
+  }
+}

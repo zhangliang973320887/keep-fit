@@ -16,6 +16,7 @@ import {
   localizeName,
   localizeType,
 } from "@/lib/exercise-translations";
+import MuscleHighlight from "@/components/MuscleHighlight";
 
 export default function ExercisesPage() {
   const { t, lang } = useLang();
@@ -254,6 +255,15 @@ export default function ExercisesPage() {
                   ✕
                 </button>
               </div>
+              {(selected.muscles.length > 0 || selected.musclesSecondary.length > 0) && (
+                <div className="-my-2">
+                  <MuscleHighlight
+                    primary={selected.muscles}
+                    secondary={selected.musclesSecondary}
+                    size={150}
+                  />
+                </div>
+              )}
               {selected.muscles.length > 0 && (
                 <div>
                   <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">
