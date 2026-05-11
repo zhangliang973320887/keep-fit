@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { LangProvider } from "@/components/LangProvider";
+import { ProfileProvider } from "@/components/ProfileProvider";
+import ProfileGate from "@/components/ProfileGate";
 import Nav from "@/components/Nav";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
@@ -39,8 +41,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="antialiased">
         <LangProvider>
-          <Nav />
-          <main className="max-w-5xl mx-auto px-4 py-6">{children}</main>
+          <ProfileProvider>
+            <Nav />
+            <main className="max-w-5xl mx-auto px-4 py-6">
+              <ProfileGate>{children}</ProfileGate>
+            </main>
+          </ProfileProvider>
         </LangProvider>
         <ServiceWorkerRegister />
       </body>

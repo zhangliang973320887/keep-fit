@@ -1,10 +1,18 @@
 // Tiny localStorage wrapper. SSR-safe (returns null/falls back when window is undefined).
+//
+// User-data keys (workouts, history, settings) are namespaced per profile via
+// `namespacedKey()` from `./profile`. Language is global (browser-level UI
+// preference, not personal data).
 import type { AppSettings, HistoryEntry, Lang, Workout } from "./types";
+import { namespacedKey } from "./profile";
 
-const KEY_WORKOUTS = "mwc.workouts.v1";
-const KEY_HISTORY = "mwc.history.v1";
+// Base keys — passed through namespacedKey() to get the active profile's namespace.
+const BASE_WORKOUTS = "mwc.workouts.v1";
+const BASE_HISTORY = "mwc.history.v1";
+const BASE_SETTINGS = "mwc.settings.v1";
+
+// Truly global keys (not per-profile):
 const KEY_LANG = "mwc.lang.v1";
-const KEY_SETTINGS = "mwc.settings.v1";
 
 const DEFAULT_SETTINGS: AppSettings = {
   voiceEnabled: true,
@@ -37,7 +45,7 @@ function safeSet<T>(key: string, value: T) {
 
 // Workouts
 export function getWorkouts(): Workout[] {
-  return safeGet<Workout[]>(KEY_WORKOUTS, []);
+  return safeGet<Workout[]>(namespacedKey(BASE_WORKOUTS), []);
 }
 
 export function getWorkout(id: string): Workout | undefined {
@@ -49,32 +57,32 @@ export function saveWorkout(workout: Workout): void {
   const idx = all.findIndex((w) => w.id === workout.id);
   if (idx >= 0) all[idx] = workout;
   else all.unshift(workout);
-  safeSet(KEY_WORKOUTS, all);
+  safeSet(namespacedKey(BASE_WORKOUTS), all);
 }
 
 export function deleteWorkout(id: string): void {
   safeSet(
-    KEY_WORKOUTS,
+    namespacedKey(BASE_WORKOUTS),
     getWorkouts().filter((w) => w.id !== id),
   );
 }
 
 // History
 export function getHistory(): HistoryEntry[] {
-  return safeGet<HistoryEntry[]>(KEY_HISTORY, []);
+  return safeGet<HistoryEntry[]>(namespacedKey(BASE_HISTORY), []);
 }
 
 export function appendHistory(entry: HistoryEntry): void {
   const all = getHistory();
   all.unshift(entry);
-  safeSet(KEY_HISTORY, all);
+  safeSet(namespacedKey(BASE_HISTORY), all);
 }
 
 export function clearHistory(): void {
-  safeSet(KEY_HISTORY, []);
+  safeSet(namespacedKey(BASE_HISTORY), []);
 }
 
-// Language
+// Language (global — UI preference, not personal data)
 export function getLang(): Lang {
   return safeGet<Lang>(KEY_LANG, "zh");
 }
@@ -83,13 +91,16 @@ export function setLang(lang: Lang): void {
   safeSet(KEY_LANG, lang);
 }
 
-// Settings
+// Settings (per-profile)
 export function getSettings(): AppSettings {
-  return { ...DEFAULT_SETTINGS, ...safeGet<Partial<AppSettings>>(KEY_SETTINGS, {}) };
+  return {
+    ...DEFAULT_SETTINGS,
+    ...safeGet<Partial<AppSettings>>(namespacedKey(BASE_SETTINGS), {}),
+  };
 }
 
 export function saveSettings(s: AppSettings): void {
-  safeSet(KEY_SETTINGS, s);
+  safeSet(namespacedKey(BASE_SETTINGS), s);
 }
 
 // Util

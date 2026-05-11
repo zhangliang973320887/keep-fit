@@ -34,6 +34,17 @@ npm start        # 跑生产构建
 - 训练计划和历史只存在你这台浏览器里。换浏览器/清缓存就没了
 - 想换数据源（自带数据集 / 自己写 JSON）只需改 `lib/wger.ts` 里的 `loadExercises()`
 
+## 用户隔离 / Profiles
+
+进入 app 第一件事会让你输入邮箱。**没有后端、没有密码、不会发邮件**——邮箱只是一个本地"档案名"，
+用来在同一台设备上区分不同人的训练计划和历史。
+
+- 数据按邮箱 namespace 存储：`mwc.workouts.v1::alice@x.com` / `mwc.history.v1::alice@x.com` / `mwc.settings.v1::alice@x.com`
+- 右上角头像点开可以切档案 / 加新档案 / 退出登录 / 删除当前档案的所有数据
+- 语言偏好（中/英）保持全局，不分账户
+- 升级前已有的训练计划/历史会自动迁移到**第一个**登录的邮箱
+- 实现都在 `lib/profile.ts` + `components/ProfileGate.tsx` + `components/ProfileProvider.tsx`
+
 ## 加更多动作的中文翻译 / Adding more ZH translations
 
 wger 的数据是英文/拉丁文的，本项目内置了一份手动维护的中文覆盖表，文件：

@@ -170,6 +170,31 @@ const dict = {
   abandon: { zh: "放弃本次训练", en: "Abandon session" },
   confirmAbandon: { zh: "确定放弃这次训练吗？", en: "Abandon this session?" },
 
+  // Profile / sign-in (no real backend — email is just a profile namespace)
+  authWelcome: { zh: "欢迎使用 Keep Fit", en: "Welcome to Keep Fit" },
+  authSubtitle: {
+    zh: "用邮箱区分不同用户。无后端、无密码，数据只存在你这台设备上。",
+    en: "Pick an email to keep your data separate. No backend, no password — everything stays on this device.",
+  },
+  authEmailLabel: { zh: "邮箱", en: "Email" },
+  authContinue: { zh: "继续", en: "Continue" },
+  authInvalidEmail: { zh: "邮箱格式不对", en: "Invalid email" },
+  authRecent: { zh: "或者继续之前用过的：", en: "Or continue as:" },
+  authNoBackendNote: {
+    zh: "这只是一个本地资料名。换邮箱 = 换一份隔离的数据。",
+    en: "This is a local profile name only. Switching email switches the isolated data set.",
+  },
+  profileMenuLabel: { zh: "账户菜单", en: "Account menu" },
+  profileActiveLabel: { zh: "当前账户", en: "Signed in as" },
+  profileSwitchTo: { zh: "切换到", en: "Switch to" },
+  profileAddAnother: { zh: "添加新账户", en: "Add another account" },
+  profileSignOut: { zh: "退出登录", en: "Sign out" },
+  profileDelete: { zh: "删除当前账户的数据", en: "Delete this account's data" },
+  profileDeleteConfirm: {
+    zh: "确定删除该账户的所有训练计划和历史？此操作只影响这台设备，且无法撤销。",
+    en: "Delete all routines and history for this profile? This affects this device only and cannot be undone.",
+  },
+
   // History
   historyTitle: { zh: "训练历史", en: "History" },
   noHistory: { zh: "还没有训练记录。", en: "No sessions recorded yet." },
