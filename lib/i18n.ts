@@ -25,6 +25,42 @@ const dict = {
   homeNoHistory: { zh: "还没有训练记录，先去搭一份计划吧。", en: "No sessions yet — build a plan first." },
   homeQuickActions: { zh: "快捷入口", en: "Quick actions" },
 
+  // Home — redesigned
+  greetingMorning: { zh: "早上好", en: "Good morning" },
+  greetingAfternoon: { zh: "下午好", en: "Good afternoon" },
+  greetingEvening: { zh: "晚上好", en: "Good evening" },
+  greetingNight: { zh: "夜深了", en: "Burning the midnight oil" },
+  greetingFirstSession: { zh: "今天还没动起来", en: "Haven't moved yet today" },
+  greetingThisWeek: { zh: "本周第 {n} 次", en: "Session {n} this week" },
+  greetingNoneThisWeek: { zh: "本周还没训练", en: "No sessions this week" },
+  greetingStreakOn: { zh: "连续 {n} 天", en: "{n}-day streak" },
+
+  // Hero CTA card
+  heroContinueTitle: { zh: "继续训练", en: "Continue training" },
+  heroContinueMeta: { zh: "{count} 个动作 · 上次 {when}", en: "{count} exercises · last {when}" },
+  heroStartFreshTitle: { zh: "今天练这个", en: "Today's pick" },
+  heroStartFreshMeta: { zh: "{count} 个动作", en: "{count} exercises" },
+  heroEmptyTitle: { zh: "搭一份计划开始", en: "Build your first routine" },
+  heroEmptyMeta: { zh: "从动作库挑几个动作，配上组数和休息", en: "Pick a few moves, set reps and rest" },
+  heroEmptyCta: { zh: "新建计划", en: "Create routine" },
+  heroStart: { zh: "开始", en: "Start" },
+
+  // Stat strip
+  statThisWeek: { zh: "本周训练", en: "This week" },
+  statActiveTime: { zh: "本周时长", en: "Active time" },
+  statTotal: { zh: "累计训练", en: "Total" },
+  statStreak: { zh: "连续天数", en: "Streak" },
+  statSuffixTimes: { zh: "次", en: "" },
+  statSuffixMin: { zh: "分钟", en: "min" },
+  statSuffixDays: { zh: "天", en: "day{s}" },
+
+  // Time ago
+  timeJustNow: { zh: "刚刚", en: "just now" },
+  timeMinAgo: { zh: "{n} 分钟前", en: "{n}m ago" },
+  timeHourAgo: { zh: "{n} 小时前", en: "{n}h ago" },
+  timeDayAgo: { zh: "{n} 天前", en: "{n}d ago" },
+  timeWeekAgo: { zh: "{n} 周前", en: "{n}w ago" },
+
   // Exercise list
   searchPlaceholder: { zh: "搜索动作（中英文均可）...", en: "Search exercises..." },
   filterCategory: { zh: "部位", en: "Category" },
