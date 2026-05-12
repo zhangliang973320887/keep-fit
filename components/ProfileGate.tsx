@@ -1,48 +1,89 @@
 "use client";
 
-// Blocks app render until a profile is active. Renders an email-entry screen
-// (with one-click switch to any previously-used email) when no one is signed
-// in. The first-ever signin will migrate legacy un-namespaced localStorage
-// data into that profile (`signIn` in profile.ts handles it transparently).
+// Blocks app render until the user is signed in.
+//
+// Two tabs: Sign in / Sign up. Backend is the source of truth — we don't
+// have a "does this email exist" lookup (would leak account existence to
+// strangers), so the user explicitly picks the action.
+//
+// On submit:
+//   - sign in   → POST /api/auth/login   (sets JWT cookie)
+//   - register  → POST /api/auth/register (also signs you in)
+// Either path triggers the one-shot localStorage→server migration in
+// ProfileProvider.
 
 import { useState, type ReactNode } from "react";
 import { useLang } from "./LangProvider";
 import { useProfile } from "./ProfileProvider";
-import { isValidEmail, normalizeEmail } from "@/lib/profile";
+import { ApiError } from "@/lib/api";
+import { isValidEmail, isValidPassword, normalizeEmail } from "@/lib/profile";
+
+type Tab = "login" | "register";
 
 export default function ProfileGate({ children }: { children: ReactNode }) {
   const { t } = useLang();
-  const { ready, activeEmail, profiles, signIn } = useProfile();
+  const { ready, profile, register, login } = useProfile();
+
+  const [tab, setTab] = useState<Tab>("login");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // Pre-hydration: just render the children — they'll get a placeholder
-  // (most pages call storage helpers inside useEffect, which only runs after
-  // hydration anyway). This avoids SSR mismatch + a flash of the login screen.
-  // Before hydration we don't know who's signed in — just render children
-  // so server-rendered HTML matches. The page-level effects only read
-  // storage after mount, so they'll naturally pick up the active email then.
-  if (!ready) return <>{children}</>;
+  // Loading state while we probe /api/auth/me
+  if (!ready) {
+    return (
+      <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center">
+        <div className="text-sm text-slate-400">{t("loading")}</div>
+      </div>
+    );
+  }
 
-  // Signed in — render children with a key tied to the email, so any page
-  // that reads storage in a [] dep useEffect still refreshes on switch
-  // (React unmounts/remounts the subtree when the key changes).
-  if (activeEmail) return <div key={activeEmail}>{children}</div>;
+  // Signed in — render the app, keyed by email so a profile switch unmounts/
+  // remounts every page-level useEffect (re-fetching their data).
+  if (profile) return <div key={profile.email}>{children}</div>;
 
-  function onSubmit(e: React.FormEvent) {
+  function mapError(e: unknown): string {
+    if (e instanceof ApiError) {
+      switch (e.code) {
+        case "invalid_email": return t("authInvalidEmail");
+        case "weak_password": return t("authPasswordTooShort");
+        case "email_taken":   return t("authEmailTaken");
+        case "wrong_credentials": return t("authWrongCredentials");
+        default: return e.code;
+      }
+    }
+    return String((e as any)?.message ?? "unknown");
+  }
+
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const v = email.trim();
-    if (!isValidEmail(v)) {
+    setError(null);
+    if (!isValidEmail(email)) {
       setError(t("authInvalidEmail"));
       return;
     }
-    setError(null);
-    signIn(v);
-    setEmail("");
-  }
-
-  function switchTo(em: string) {
-    signIn(em);
+    if (!isValidPassword(password)) {
+      setError(t("authPasswordTooShort"));
+      return;
+    }
+    if (tab === "register" && password !== confirm) {
+      setError(t("authPasswordMismatch"));
+      return;
+    }
+    setBusy(true);
+    try {
+      if (tab === "register") {
+        await register(email, password);
+      } else {
+        await login(email, password);
+      }
+    } catch (err) {
+      setError(mapError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -62,8 +103,34 @@ export default function ProfileGate({ children }: { children: ReactNode }) {
             {t("authWelcome")}
           </h1>
           <p className="mt-1.5 text-sm text-slate-500 leading-relaxed">
-            {t("authSubtitle")}
+            {t("authSubtitleBackend")}
           </p>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 mb-5">
+          <button
+            type="button"
+            onClick={() => { setTab("login"); setError(null); }}
+            className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${
+              tab === "login"
+                ? "bg-white dark:bg-slate-900 shadow-sm text-slate-900 dark:text-slate-100"
+                : "text-slate-500"
+            }`}
+          >
+            {t("authSignIn")}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setTab("register"); setError(null); }}
+            className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${
+              tab === "register"
+                ? "bg-white dark:bg-slate-900 shadow-sm text-slate-900 dark:text-slate-100"
+                : "text-slate-500"
+            }`}
+          >
+            {t("authSignUp")}
+          </button>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-3">
@@ -77,69 +144,65 @@ export default function ProfileGate({ children }: { children: ReactNode }) {
               autoComplete="email"
               autoFocus
               value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                if (error) setError(null);
-              }}
+              onChange={(e) => { setEmail(e.target.value); if (error) setError(null); }}
               placeholder="you@example.com"
-              className={`w-full rounded-xl border px-3.5 py-2.5 text-sm bg-white dark:bg-slate-900 outline-none transition focus:ring-2 focus:ring-brand-500/40 ${
-                error
-                  ? "border-rose-400"
-                  : "border-slate-200 dark:border-slate-800 focus:border-brand-500"
-              }`}
+              className={fieldClass(false)}
             />
-            {error && (
-              <p className="mt-1.5 text-xs text-rose-500">{error}</p>
-            )}
           </div>
-
-          <button
-            type="submit"
-            className="w-full rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium py-2.5 transition shadow-sm"
-          >
-            {t("authContinue")}
+          <div>
+            <label className="block text-xs text-slate-500 mb-1.5">
+              {t("authPasswordLabel")}
+            </label>
+            <input
+              type="password"
+              autoComplete={tab === "register" ? "new-password" : "current-password"}
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); if (error) setError(null); }}
+              placeholder={tab === "register" ? "≥ 6" : ""}
+              className={fieldClass(false)}
+            />
+          </div>
+          {tab === "register" && (
+            <div>
+              <label className="block text-xs text-slate-500 mb-1.5">
+                {t("authPasswordConfirmLabel")}
+              </label>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={confirm}
+                onChange={(e) => { setConfirm(e.target.value); if (error) setError(null); }}
+                className={fieldClass(!!error)}
+              />
+            </div>
+          )}
+          {error && <p className="text-xs text-rose-500">{error}</p>}
+          <button type="submit" disabled={busy} className={primaryBtn}>
+            {busy ? "…" : tab === "register" ? t("authSignUp") : t("authSignIn")}
           </button>
         </form>
 
-        {profiles.length > 0 && (
-          <div className="mt-7">
-            <div className="text-xs text-slate-500 mb-2 px-1">
-              {t("authRecent")}
-            </div>
-            <ul className="space-y-1.5">
-              {profiles.map((p) => (
-                <li key={p.email}>
-                  <button
-                    type="button"
-                    onClick={() => switchTo(p.email)}
-                    className="w-full flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-800 px-3 py-2.5 hover:border-brand-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition text-left"
-                  >
-                    <Avatar email={p.email} />
-                    <span className="flex-1 text-sm truncate">{p.email}</span>
-                    <span className="text-xs text-slate-400">→</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         <p className="mt-7 text-center text-xs text-slate-400 leading-relaxed px-3">
-          {t("authNoBackendNote")}
+          {t("authBackendNote")}
         </p>
       </div>
     </div>
   );
 }
 
-// Tiny gradient initials avatar — used here and re-exported for Nav.
-export function Avatar({
-  email,
-  size = 28,
-}: {
-  email: string;
-  size?: number;
-}) {
+const primaryBtn =
+  "w-full rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white font-medium py-2.5 transition shadow-sm";
+
+function fieldClass(hasError: boolean): string {
+  const base =
+    "w-full rounded-xl border px-3.5 py-2.5 text-sm bg-white dark:bg-slate-900 outline-none transition focus:ring-2 focus:ring-brand-500/40";
+  return hasError
+    ? `${base} border-rose-400`
+    : `${base} border-slate-200 dark:border-slate-800 focus:border-brand-500`;
+}
+
+// Re-export Avatar for Nav.
+export function Avatar({ email, size = 28 }: { email: string; size?: number }) {
   const initial = (normalizeEmail(email)[0] ?? "?").toUpperCase();
   const hue = hashHue(email);
   return (

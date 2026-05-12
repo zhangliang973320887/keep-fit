@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLang } from "@/components/LangProvider";
@@ -47,16 +47,21 @@ function NewWorkoutPageInner() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
 
-  // Hydrate when editing existing
+  // Hydrate when editing an existing workout. We hold the createdAt timestamp
+  // in a ref so onSave can preserve it without re-fetching.
+  const editedCreatedAtRef = useRef<string | null>(null);
   useEffect(() => {
-    if (editId) {
-      const w = getWorkout(editId);
-      if (w) {
-        setName(w.name);
-        setDescription(w.description ?? "");
-        setPicked(w.exercises);
-      }
-    }
+    if (!editId) return;
+    let cancelled = false;
+    (async () => {
+      const w = await getWorkout(editId);
+      if (!w || cancelled) return;
+      setName(w.name);
+      setDescription(w.description ?? "");
+      setPicked(w.exercises);
+      editedCreatedAtRef.current = w.createdAt;
+    })();
+    return () => { cancelled = true; };
   }, [editId]);
 
   // Load exercise library
@@ -119,7 +124,7 @@ function NewWorkoutPageInner() {
     });
   };
 
-  const onSave = () => {
+  const onSave = async () => {
     if (!name.trim()) {
       alert(t("workoutName"));
       return;
@@ -134,11 +139,15 @@ function NewWorkoutPageInner() {
       name: name.trim(),
       description: description.trim() || undefined,
       exercises: picked,
-      createdAt: editId ? getWorkout(editId)?.createdAt ?? now : now,
+      createdAt: editId ? editedCreatedAtRef.current ?? now : now,
       updatedAt: now,
     };
-    saveWorkout(w);
-    router.push("/workouts");
+    try {
+      await saveWorkout(w);
+      router.push("/workouts");
+    } catch (err) {
+      alert(String((err as any)?.message ?? "save failed"));
+    }
   };
 
   const pickedIds = new Set(picked.map((p) => p.exerciseId));

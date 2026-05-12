@@ -1,17 +1,13 @@
-// Tiny localStorage wrapper. SSR-safe (returns null/falls back when window is undefined).
+// User data (workouts / history / settings) now lives on the Go backend,
+// accessed via fetch + httpOnly auth cookie. All these helpers are async.
 //
-// User-data keys (workouts, history, settings) are namespaced per profile via
-// `namespacedKey()` from `./profile`. Language is global (browser-level UI
-// preference, not personal data).
+// Language preference stays in localStorage — it's a per-device UI choice,
+// not personal data, and would be jarring if it changed every time you log
+// in on a different device.
+
 import type { AppSettings, HistoryEntry, Lang, Workout } from "./types";
-import { namespacedKey } from "./profile";
+import { api } from "./api";
 
-// Base keys — passed through namespacedKey() to get the active profile's namespace.
-const BASE_WORKOUTS = "mwc.workouts.v1";
-const BASE_HISTORY = "mwc.history.v1";
-const BASE_SETTINGS = "mwc.settings.v1";
-
-// Truly global keys (not per-profile):
 const KEY_LANG = "mwc.lang.v1";
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -24,87 +20,79 @@ const DEFAULT_SETTINGS: AppSettings = {
   videoSpeedMultiplier: 1.0,
 };
 
-function safeGet<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+// ---- Workouts -------------------------------------------------------------
+
+export async function getWorkouts(): Promise<Workout[]> {
+  return await api.get<Workout[]>("/api/workouts");
 }
 
-function safeSet<T>(key: string, value: T) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // quota or serialization failure — silently swallow
-  }
+export async function getWorkout(id: string): Promise<Workout | undefined> {
+  // The backend doesn't expose a single-workout endpoint (kept the API small);
+  // we filter client-side. The full list is paginated nowhere yet so this is fine.
+  const all = await getWorkouts();
+  return all.find((w) => w.id === id);
 }
 
-// Workouts
-export function getWorkouts(): Workout[] {
-  return safeGet<Workout[]>(namespacedKey(BASE_WORKOUTS), []);
+export async function saveWorkout(workout: Workout): Promise<Workout> {
+  // The handler accepts both POST /api/workouts and PUT /api/workouts/:id
+  // and behaves the same — upsert by (user_id, client_id).
+  return await api.post<Workout>("/api/workouts", workout);
 }
 
-export function getWorkout(id: string): Workout | undefined {
-  return getWorkouts().find((w) => w.id === id);
+export async function deleteWorkout(id: string): Promise<void> {
+  await api.del(`/api/workouts/${encodeURIComponent(id)}`);
 }
 
-export function saveWorkout(workout: Workout): void {
-  const all = getWorkouts();
-  const idx = all.findIndex((w) => w.id === workout.id);
-  if (idx >= 0) all[idx] = workout;
-  else all.unshift(workout);
-  safeSet(namespacedKey(BASE_WORKOUTS), all);
+// ---- History --------------------------------------------------------------
+
+export async function getHistory(): Promise<HistoryEntry[]> {
+  return await api.get<HistoryEntry[]>("/api/history");
 }
 
-export function deleteWorkout(id: string): void {
-  safeSet(
-    namespacedKey(BASE_WORKOUTS),
-    getWorkouts().filter((w) => w.id !== id),
-  );
+export async function appendHistory(entry: HistoryEntry): Promise<void> {
+  await api.post("/api/history", entry);
 }
 
-// History
-export function getHistory(): HistoryEntry[] {
-  return safeGet<HistoryEntry[]>(namespacedKey(BASE_HISTORY), []);
+export async function clearHistory(): Promise<void> {
+  await api.del("/api/history");
 }
 
-export function appendHistory(entry: HistoryEntry): void {
-  const all = getHistory();
-  all.unshift(entry);
-  safeSet(namespacedKey(BASE_HISTORY), all);
+// ---- Settings -------------------------------------------------------------
+
+export async function getSettings(): Promise<AppSettings> {
+  const raw = await api.get<Partial<AppSettings>>("/api/settings");
+  return { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
 }
 
-export function clearHistory(): void {
-  safeSet(namespacedKey(BASE_HISTORY), []);
+export async function saveSettings(s: AppSettings): Promise<void> {
+  await api.put("/api/settings", s);
 }
 
-// Language (global — UI preference, not personal data)
+// ---- Language (kept local — per-device UI preference) ---------------------
+
 export function getLang(): Lang {
-  return safeGet<Lang>(KEY_LANG, "zh");
+  if (typeof window === "undefined") return "zh";
+  try {
+    const raw = window.localStorage.getItem(KEY_LANG);
+    return raw ? (JSON.parse(raw) as Lang) : "zh";
+  } catch {
+    return "zh";
+  }
 }
 
 export function setLang(lang: Lang): void {
-  safeSet(KEY_LANG, lang);
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(KEY_LANG, JSON.stringify(lang));
+  } catch {
+    /* swallow */
+  }
 }
 
-// Settings (per-profile)
-export function getSettings(): AppSettings {
-  return {
-    ...DEFAULT_SETTINGS,
-    ...safeGet<Partial<AppSettings>>(namespacedKey(BASE_SETTINGS), {}),
-  };
-}
+// ---- Util -----------------------------------------------------------------
 
-export function saveSettings(s: AppSettings): void {
-  safeSet(namespacedKey(BASE_SETTINGS), s);
-}
-
-// Util
 export function uid(): string {
-  // RFC4122-ish lightweight ID — fine for client-only data
+  // RFC4122-ish lightweight ID — used as the stable client_id for syncing
+  // a workout to the backend across edit + create.
   return "id-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }

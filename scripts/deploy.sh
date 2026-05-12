@@ -12,6 +12,8 @@ cd "$(dirname "$0")/.."
 APP_NAME="keep-fit"
 NODE_REQ_MAJOR=18
 NODE_INSTALL_VERSION="20.18.0"
+GO_REQ_VERSION="1.22"
+GO_INSTALL_VERSION="1.22.10"
 NPM_REGISTRY="https://registry.npmmirror.com"
 
 # ---------- helpers -----------------------------------------------------------
@@ -232,6 +234,78 @@ ensure_node() {
   exit 1
 }
 
+go_version() {
+  go version 2>/dev/null | sed -nE 's/^go version go([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/p'
+}
+
+go_meets_req() {
+  local v="$1" req="$2"
+  # Simple major.minor compare
+  local v_maj v_min req_maj req_min
+  v_maj=$(echo "$v" | cut -d. -f1)
+  v_min=$(echo "$v" | cut -d. -f2)
+  req_maj=$(echo "$req" | cut -d. -f1)
+  req_min=$(echo "$req" | cut -d. -f2)
+  if [ "$v_maj" -gt "$req_maj" ]; then return 0; fi
+  if [ "$v_maj" -lt "$req_maj" ]; then return 1; fi
+  [ "$v_min" -ge "$req_min" ]
+}
+
+ensure_go() {
+  local v
+  if v=$(go_version) && go_meets_req "$v" "$GO_REQ_VERSION"; then
+    echo "  ✓ Go ${v}"
+    return 0
+  fi
+  if [ "${KEEPFIT_NO_AUTO_INSTALL:-0}" = "1" ]; then
+    echo "  ✗ Auto-install disabled (KEEPFIT_NO_AUTO_INSTALL=1). Install Go ${GO_REQ_VERSION}+ manually and re-run."
+    exit 1
+  fi
+  echo "==> Auto-installing Go ${GO_INSTALL_VERSION}"
+
+  local arch
+  arch=$(uname -m)
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    armv7l|armv6l) arch="armv6l" ;;
+    *) echo "  ✗ Unsupported arch: $arch"; exit 1 ;;
+  esac
+  local pkg url
+  pkg="go${GO_INSTALL_VERSION}.linux-${arch}.tar.gz"
+  url="https://golang.org/dl/${pkg}"
+
+  cd /tmp
+  sudo_run rm -rf "${pkg}"
+  if ! sudo_run curl -fL --connect-timeout 15 --max-time 600 -o "${pkg}" "${url}"; then
+    # Mirror fallback (China-friendly)
+    url="https://golang.google.cn/dl/${pkg}"
+    echo "  Retrying via ${url}"
+    if ! sudo_run curl -fL --connect-timeout 15 --max-time 600 -o "${pkg}" "${url}"; then
+      echo "  ✗ Could not fetch Go tarball"
+      cd - >/dev/null
+      exit 1
+    fi
+  fi
+  sudo_run rm -rf /usr/local/go
+  sudo_run tar -C /usr/local -xzf "${pkg}"
+  sudo_run rm -f "${pkg}"
+  cd - >/dev/null
+
+  # Add /usr/local/go/bin to PATH for future shells + this one
+  echo 'export PATH="/usr/local/go/bin:$PATH"' \
+    | sudo_run tee /etc/profile.d/keepfit-go.sh >/dev/null
+  sudo_run chmod 0755 /etc/profile.d/keepfit-go.sh
+  export PATH="/usr/local/go/bin:$PATH"
+  hash -r
+
+  if ! v=$(go_version) || ! go_meets_req "$v" "$GO_REQ_VERSION"; then
+    echo "  ✗ Go install seemed to succeed but go version still fails"
+    exit 1
+  fi
+  echo "  ✓ Go ${v}"
+}
+
 ensure_pm2() {
   if command -v pm2 >/dev/null 2>&1; then
     echo "  ✓ PM2 $(pm2 -v)"
@@ -268,6 +342,7 @@ ensure_pm2() {
 echo "==> Keep Fit deploy"
 
 ensure_node
+ensure_go
 ensure_pm2
 
 if ! grep -q "registry=" .npmrc 2>/dev/null; then
@@ -275,28 +350,52 @@ if ! grep -q "registry=" .npmrc 2>/dev/null; then
   npm config set registry "$NPM_REGISTRY"
 fi
 
-echo "==> Installing dependencies (npm ci)"
+echo "==> Installing frontend dependencies (npm ci)"
 npm ci
 
-echo "==> Building production bundle"
+echo "==> Building frontend production bundle"
 npm run build
 
-mkdir -p logs
+echo "==> Building Go backend"
+(
+  cd backend
+  go mod download
+  CGO_ENABLED=0 go build -ldflags="-s -w" -o keep-fit-api .
+)
+
+mkdir -p logs data
+
+# Generate / persist JWT_SECRET if the operator hasn't pinned one.
+if [ -z "${JWT_SECRET:-}" ] && [ ! -f .env.jwt ]; then
+  echo "==> Generating JWT_SECRET (saved to .env.jwt; back this up or pin in env)"
+  # 32 random bytes → 64 hex chars. Falls back to /dev/urandom if openssl missing.
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32 > .env.jwt
+  else
+    head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > .env.jwt
+  fi
+  chmod 600 .env.jwt
+fi
+if [ -f .env.jwt ]; then
+  export JWT_SECRET=$(cat .env.jwt)
+fi
+
 if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
-  echo "==> App already running — reloading (zero downtime)"
+  echo "==> Apps already running — reloading (zero downtime)"
   pm2 reload ecosystem.config.js --update-env
 else
   echo "==> Starting fresh"
-  pm2 start ecosystem.config.js
+  pm2 start ecosystem.config.js --update-env
 fi
 
 pm2 save
 
 echo ""
 echo "✓ Deployed."
-pm2 status "$APP_NAME"
+pm2 status
 echo ""
-echo "Default URL: http://localhost:3000"
+echo "Frontend: http://localhost:3000"
+echo "Backend:  http://localhost:8080/api/health"
 echo ""
 echo "To start on boot (run once):"
 echo "    pm2 startup       # then run the printed sudo command"

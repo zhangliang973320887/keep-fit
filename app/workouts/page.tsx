@@ -11,13 +11,24 @@ export default function WorkoutsPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
 
   useEffect(() => {
-    setWorkouts(getWorkouts());
+    let cancelled = false;
+    (async () => {
+      try {
+        const w = await getWorkouts();
+        if (!cancelled) setWorkouts(w);
+      } catch {
+        /* ProfileGate handles auth-failure UI */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const onDelete = (id: string) => {
+  const onDelete = async (id: string) => {
     if (!confirm(t("confirmDelete"))) return;
-    deleteWorkout(id);
-    setWorkouts(getWorkouts());
+    await deleteWorkout(id);
+    setWorkouts(await getWorkouts());
   };
 
   return (

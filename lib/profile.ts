@@ -1,39 +1,36 @@
-// Profile management.
+// Profile / auth — now backed by the Go backend.
 //
-// "Profiles" are pure-localStorage namespaces — there is NO server-side
-// authentication, no email verification, no password. An email is just a
-// stable name a user picks so their workouts/history are isolated from any
-// other person who shares the device.
+// We keep the same exported names that the rest of the app already uses
+// (`getActiveEmail`, `register`, `login`, etc.) but they now make HTTP calls
+// instead of touching localStorage. Auth state lives in the httpOnly `kf_token`
+// cookie that the backend sets; we never see the token in JS.
 //
-// Why this approach: the app's design promise is "no login, no backend".
-// We honor that by keeping every byte of user data in localStorage; the email
-// is only used as a partition key. Switching profiles = switching the active
-// namespace.
+// The "active email" is what `/api/auth/me` returns. We cache it in
+// React state via ProfileProvider; here we just expose the underlying
+// fetch helpers.
 
-import type { Lang } from "./types";
+import { api, ApiError } from "./api";
 
-// ---- key constants (global, NOT namespaced) ----
-const KEY_PROFILES = "mwc.profiles.v1";
-const KEY_ACTIVE = "mwc.profile.active.v1";
-const KEY_MIGRATED = "mwc.profile.migrated.v1";
-
-// Original (un-namespaced) keys that pre-date the profile system. We migrate
-// these into the first profile's namespace on signup.
-export const LEGACY_KEYS = [
+// Legacy localStorage keys that may still hold data from before the backend
+// existed. On first successful sign-in we POST them to /api/migrate then wipe.
+const LEGACY_KEYS = [
   "mwc.workouts.v1",
   "mwc.history.v1",
   "mwc.settings.v1",
 ] as const;
+const LEGACY_PROFILES_KEY = "mwc.profiles.v2";
+const LEGACY_ACTIVE_KEY = "mwc.profile.active.v1";
+const MIGRATED_FLAG_KEY = "mwc.server_migrated.v1";
 
 export interface Profile {
-  email: string; // normalized: lowercased + trimmed
-  createdAt: string; // ISO timestamp
-  lang?: Lang; // remembered last-used language per profile (optional)
+  email: string;
+  createdAt: string;
 }
 
-// ---- email helpers ----
+// ---- email helpers (still used by the gate UI) ----
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 6;
 
 export function normalizeEmail(input: string): string {
   return (input ?? "").trim().toLowerCase();
@@ -44,179 +41,150 @@ export function isValidEmail(input: string): boolean {
   return EMAIL_RE.test(e) && e.length <= 254;
 }
 
-// ---- safe storage helpers (SSR-safe) ----
+export function isValidPassword(input: string): boolean {
+  return typeof input === "string" && input.length >= MIN_PASSWORD_LENGTH;
+}
 
-function safeGet<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
+// ---- /api/auth ----
+
+export async function fetchMe(): Promise<Profile | null> {
   try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
+    return await api.get<Profile>("/api/auth/me");
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return null;
+    throw err;
   }
 }
 
-function safeSet<T>(key: string, value: T): void {
-  if (typeof window === "undefined") return;
+export async function register(
+  rawEmail: string,
+  password: string,
+): Promise<Profile> {
+  if (!isValidEmail(rawEmail)) throw new ApiError(400, "invalid_email");
+  if (!isValidPassword(password)) throw new ApiError(400, "weak_password");
+  return api.post<Profile>("/api/auth/register", {
+    email: normalizeEmail(rawEmail),
+    password,
+  });
+}
+
+export async function login(
+  rawEmail: string,
+  password: string,
+): Promise<Profile> {
+  return api.post<Profile>("/api/auth/login", {
+    email: normalizeEmail(rawEmail),
+    password,
+  });
+}
+
+export async function signOut(): Promise<void> {
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    await api.post("/api/auth/logout");
   } catch {
-    /* quota — swallow */
+    /* server-side logout best-effort; cookie clearing might already be gone */
   }
 }
 
-// ---- profile list ----
-
-export function getProfiles(): Profile[] {
-  return safeGet<Profile[]>(KEY_PROFILES, []);
+export async function deleteAccount(): Promise<void> {
+  await api.del("/api/auth/account");
 }
 
-function saveProfiles(list: Profile[]): void {
-  safeSet(KEY_PROFILES, list);
-}
+// ---- one-shot localStorage → server migration ----
 
-export function getProfile(email: string): Profile | undefined {
-  const e = normalizeEmail(email);
-  return getProfiles().find((p) => p.email === e);
-}
-
-// Idempotent. Returns the existing profile if already registered, otherwise
-// appends a new one.
-export function upsertProfile(email: string): Profile {
-  const e = normalizeEmail(email);
-  const list = getProfiles();
-  const existing = list.find((p) => p.email === e);
-  if (existing) return existing;
-  const fresh: Profile = { email: e, createdAt: new Date().toISOString() };
-  list.push(fresh);
-  saveProfiles(list);
-  return fresh;
-}
-
-export function removeProfile(email: string): void {
-  const e = normalizeEmail(email);
-  saveProfiles(getProfiles().filter((p) => p.email !== e));
-  if (getActiveEmail() === e) clearActiveEmail();
-  // Sweep this profile's namespaced data.
-  if (typeof window === "undefined") return;
-  const suffix = `::${e}`;
-  const toRemove: string[] = [];
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const k = window.localStorage.key(i);
-    if (k && k.endsWith(suffix)) toRemove.push(k);
-  }
-  for (const k of toRemove) {
-    try {
-      window.localStorage.removeItem(k);
-    } catch {
-      /* swallow */
-    }
-  }
-}
-
-// ---- active profile ----
-
-export function getActiveEmail(): string | null {
+/**
+ * If the browser has any leftover pre-backend localStorage data, POST it to
+ * the server under the currently-authenticated user, then mark the migration
+ * as done so it never runs again. Safe to call on every sign-in — it no-ops
+ * once the flag is set.
+ *
+ * Returns the number of items uploaded (or null if nothing to do).
+ */
+export async function migrateLocalToServer(): Promise<{
+  workouts: number;
+  history: number;
+  settings: number;
+} | null> {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage.getItem(KEY_ACTIVE);
+    if (window.localStorage.getItem(MIGRATED_FLAG_KEY) === "1") return null;
   } catch {
     return null;
   }
-}
 
-export function setActiveEmail(email: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(KEY_ACTIVE, normalizeEmail(email));
-  } catch {
-    /* swallow */
-  }
-}
+  // Gather payload. We look for both un-namespaced keys (very old) and
+  // namespaced keys (the email::email variant we used briefly). For namespaced
+  // ones we use whatever was active at the time as the source.
+  const payload: {
+    workouts?: any[];
+    history?: any[];
+    settings?: any;
+  } = {};
 
-export function clearActiveEmail(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(KEY_ACTIVE);
-  } catch {
-    /* swallow */
-  }
-}
-
-// ---- key namespacing ----
-
-/**
- * Given a base key like "mwc.workouts.v1", return the namespaced variant
- * for the currently active profile (e.g. "mwc.workouts.v1::alice@x.com").
- *
- * If no profile is active (shouldn't happen in normal flow because the
- * ProfileGate blocks the app), we fall back to the legacy un-namespaced key
- * — that keeps tests / direct-localStorage usage from breaking.
- */
-export function namespacedKey(base: string): string {
-  const email = getActiveEmail();
-  return email ? `${base}::${email}` : base;
-}
-
-// ---- one-shot migration ----
-
-/**
- * Move legacy un-namespaced keys (workouts / history / settings written before
- * the profile system existed) into the given email's namespace.
- *
- * Only runs once per browser — guarded by KEY_MIGRATED. If the legacy keys
- * already happen to be empty, we still set the flag so we don't keep checking.
- */
-export function migrateLegacyDataTo(email: string): {
-  migratedKeys: string[];
-} {
-  if (typeof window === "undefined") return { migratedKeys: [] };
-  const alreadyDone = safeGet<boolean>(KEY_MIGRATED, false);
-  if (alreadyDone) return { migratedKeys: [] };
-
-  const e = normalizeEmail(email);
-  const migrated: string[] = [];
-  for (const base of LEGACY_KEYS) {
+  const readJSON = (k: string): any => {
     try {
-      const raw = window.localStorage.getItem(base);
-      if (raw == null) continue;
-      const target = `${base}::${e}`;
-      // Don't clobber data the user might already have in the new namespace
-      // (extremely unlikely on first signup, but harmless to guard).
-      if (window.localStorage.getItem(target) == null) {
-        window.localStorage.setItem(target, raw);
-        migrated.push(base);
-      }
-      window.localStorage.removeItem(base);
+      const raw = window.localStorage.getItem(k);
+      return raw ? JSON.parse(raw) : null;
     } catch {
-      /* swallow */
+      return null;
     }
+  };
+
+  // First try un-namespaced legacy
+  const unnamespacedWorkouts = readJSON(LEGACY_KEYS[0]);
+  const unnamespacedHistory = readJSON(LEGACY_KEYS[1]);
+  const unnamespacedSettings = readJSON(LEGACY_KEYS[2]);
+  if (unnamespacedWorkouts) payload.workouts = unnamespacedWorkouts;
+  if (unnamespacedHistory) payload.history = unnamespacedHistory;
+  if (unnamespacedSettings) payload.settings = unnamespacedSettings;
+
+  // Then look for any namespaced data
+  const activeEmail = window.localStorage.getItem(LEGACY_ACTIVE_KEY);
+  if (activeEmail) {
+    const w = readJSON(`${LEGACY_KEYS[0]}::${activeEmail}`);
+    const h = readJSON(`${LEGACY_KEYS[1]}::${activeEmail}`);
+    const s = readJSON(`${LEGACY_KEYS[2]}::${activeEmail}`);
+    if (w && !payload.workouts) payload.workouts = w;
+    if (h && !payload.history) payload.history = h;
+    if (s && !payload.settings) payload.settings = s;
   }
-  safeSet(KEY_MIGRATED, true);
-  return { migratedKeys: migrated };
-}
 
-// ---- combined "sign in" helper ----
+  // Reshape workouts/history to match server's DTO (`id` field instead of `clientId`).
+  // The frontend already uses `.id`, so it lines up — but legacy shapes might be
+  // bare so we don't transform here; the server skips malformed entries.
 
-/**
- * Idempotent: create-or-fetch the profile, mark it active, run legacy
- * migration if this is the very first sign-in.
- * Returns whether the legacy data was migrated into this profile (used to
- * show the user a one-time "we kept your previous data" notice).
- */
-export function signIn(rawEmail: string): {
-  profile: Profile;
-  migrated: boolean;
-} {
-  if (!isValidEmail(rawEmail)) {
-    throw new Error("invalid_email");
+  if (!payload.workouts && !payload.history && !payload.settings) {
+    try {
+      window.localStorage.setItem(MIGRATED_FLAG_KEY, "1");
+    } catch { /* swallow */ }
+    return null;
   }
-  const profile = upsertProfile(rawEmail);
-  setActiveEmail(profile.email);
-  const { migratedKeys } = migrateLegacyDataTo(profile.email);
-  return { profile, migrated: migratedKeys.length > 0 };
-}
 
-export function signOut(): void {
-  clearActiveEmail();
+  let result: { workouts: number; history: number; settings: number };
+  try {
+    result = await api.post<{ workouts: number; history: number; settings: number }>(
+      "/api/migrate",
+      payload,
+    );
+  } catch {
+    // Don't mark migrated — let it retry next session
+    return null;
+  }
+
+  // Success — wipe legacy keys so they don't get re-uploaded later
+  try {
+    for (const k of LEGACY_KEYS) {
+      window.localStorage.removeItem(k);
+      if (activeEmail) window.localStorage.removeItem(`${k}::${activeEmail}`);
+    }
+    window.localStorage.removeItem(LEGACY_PROFILES_KEY);
+    window.localStorage.removeItem(LEGACY_ACTIVE_KEY);
+    window.localStorage.removeItem("mwc.profiles.v1");
+    window.localStorage.removeItem("mwc.profile.migrated.v1");
+    window.localStorage.setItem(MIGRATED_FLAG_KEY, "1");
+  } catch {
+    /* swallow */
+  }
+
+  return result;
 }

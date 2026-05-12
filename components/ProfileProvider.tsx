@@ -1,12 +1,8 @@
 "use client";
 
-// Holds the currently-active profile email in React context, so that:
-//   1. The Nav can render the profile chip / switcher
-//   2. Pages can re-fetch their data (workouts/history) when the user switches
-//      profiles — they subscribe to the email and re-run their effects.
-//
-// Without this, switching profiles wouldn't trigger any UI updates because
-// localStorage changes don't notify React.
+// Auth state is "whatever /api/auth/me returns" — we cache it in state, and
+// keep it in sync via the register/login/signOut helpers. The actual JWT
+// lives in an httpOnly cookie the JS side can't see, which is the point.
 
 import {
   createContext,
@@ -18,87 +14,86 @@ import {
   type ReactNode,
 } from "react";
 import {
-  getActiveEmail,
-  getProfiles,
-  signIn as signInProfile,
+  fetchMe,
+  register as registerProfile,
+  login as loginProfile,
   signOut as signOutProfile,
-  removeProfile,
+  deleteAccount as deleteAccountProfile,
+  migrateLocalToServer,
   type Profile,
 } from "@/lib/profile";
 
 interface Ctx {
-  /** null while SSR / before hydration */
-  activeEmail: string | null;
-  /** all profiles known on this device */
-  profiles: Profile[];
-  /** has the client mounted? (avoid SSR/CSR flash) */
+  /** Server-confirmed profile, or null when signed out */
+  profile: Profile | null;
+  /** True once the initial /api/auth/me probe has finished */
   ready: boolean;
-  /** create-or-switch profile. Returns whether legacy data was migrated. */
-  signIn: (email: string) => { migrated: boolean };
-  /** clear the active profile (keeps localStorage data) */
-  signOut: () => void;
-  /** delete a profile and ALL its data from this device */
-  deleteProfile: (email: string) => void;
+  register: (email: string, password: string) => Promise<{ migrated: { workouts: number; history: number; settings: number } | null }>;
+  login: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const ProfileContext = createContext<Ctx>({
-  activeEmail: null,
-  profiles: [],
+  profile: null,
   ready: false,
-  signIn: () => ({ migrated: false }),
-  signOut: () => {},
-  deleteProfile: () => {},
+  register: async () => ({ migrated: null }),
+  login: async () => {},
+  signOut: async () => {},
+  deleteAccount: async () => {},
 });
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
-  const [activeEmail, setActiveEmailState] = useState<string | null>(null);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [ready, setReady] = useState(false);
 
-  // Hydrate from localStorage on first mount (avoids SSR mismatch).
+  // Probe /api/auth/me on mount.
   useEffect(() => {
-    setActiveEmailState(getActiveEmail());
-    setProfiles(getProfiles());
-    setReady(true);
-  }, []);
-
-  // Cross-tab sync: another tab signing in/out should be reflected here.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    function onStorage(e: StorageEvent) {
-      if (
-        e.key === "mwc.profile.active.v1" ||
-        e.key === "mwc.profiles.v1"
-      ) {
-        setActiveEmailState(getActiveEmail());
-        setProfiles(getProfiles());
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await fetchMe();
+        if (!cancelled) setProfile(me);
+      } catch {
+        if (!cancelled) setProfile(null);
+      } finally {
+        if (!cancelled) setReady(true);
       }
-    }
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const signIn = useCallback((email: string) => {
-    const { profile, migrated } = signInProfile(email);
-    setActiveEmailState(profile.email);
-    setProfiles(getProfiles());
+  const register = useCallback(async (email: string, password: string) => {
+    const p = await registerProfile(email, password);
+    // First successful sign-in is when we sweep legacy localStorage data up.
+    const migrated = await migrateLocalToServer().catch(() => null);
+    setProfile(p);
     return { migrated };
   }, []);
 
-  const signOut = useCallback(() => {
-    signOutProfile();
-    setActiveEmailState(null);
+  const login = useCallback(async (email: string, password: string) => {
+    const p = await loginProfile(email, password);
+    // Migrate in the login path too — covers the user who upgraded the app
+    // and is logging into an *existing* account that has localStorage data.
+    await migrateLocalToServer().catch(() => null);
+    setProfile(p);
   }, []);
 
-  const deleteProfile = useCallback((email: string) => {
-    removeProfile(email);
-    setActiveEmailState(getActiveEmail());
-    setProfiles(getProfiles());
+  const signOut = useCallback(async () => {
+    await signOutProfile();
+    setProfile(null);
+  }, []);
+
+  const deleteAccount = useCallback(async () => {
+    await deleteAccountProfile();
+    setProfile(null);
   }, []);
 
   const value = useMemo(
-    () => ({ activeEmail, profiles, ready, signIn, signOut, deleteProfile }),
-    [activeEmail, profiles, ready, signIn, signOut, deleteProfile],
+    () => ({ profile, ready, register, login, signOut, deleteAccount }),
+    [profile, ready, register, login, signOut, deleteAccount],
   );
 
   return (

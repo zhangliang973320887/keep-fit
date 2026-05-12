@@ -50,15 +50,10 @@ export default function Nav() {
 }
 
 // ---------------------------------------------------------------------------
-// Profile chip + dropdown — only renders when a profile is active.
 function ProfileMenu() {
   const { t } = useLang();
-  const { activeEmail, profiles, signIn, signOut, deleteProfile, ready } =
-    useProfile();
+  const { profile, signOut, deleteAccount, ready } = useProfile();
   const [open, setOpen] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [err, setErr] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click + Escape
@@ -67,14 +62,10 @@ function ProfileMenu() {
     function onDown(e: MouseEvent) {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         setOpen(false);
-        setAdding(false);
       }
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setOpen(false);
-        setAdding(false);
-      }
+      if (e.key === "Escape") setOpen(false);
     }
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
@@ -84,21 +75,7 @@ function ProfileMenu() {
     };
   }, [open]);
 
-  if (!ready || !activeEmail) return null;
-
-  const others = profiles.filter((p) => p.email !== activeEmail);
-
-  function onAddSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    try {
-      signIn(draft);
-      setDraft("");
-      setAdding(false);
-      setOpen(false);
-    } catch {
-      setErr(t("authInvalidEmail"));
-    }
-  }
+  if (!ready || !profile) return null;
 
   return (
     <div ref={rootRef} className="relative ml-1">
@@ -110,9 +87,9 @@ function ProfileMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <Avatar email={activeEmail} size={28} />
+        <Avatar email={profile.email} size={28} />
         <span className="hidden sm:inline text-xs text-slate-600 dark:text-slate-300 max-w-[140px] truncate">
-          {activeEmail}
+          {profile.email}
         </span>
       </button>
 
@@ -122,98 +99,18 @@ function ProfileMenu() {
           className="absolute right-0 mt-2 w-72 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-lg overflow-hidden z-50"
         >
           <div className="p-3 flex items-center gap-3 border-b border-slate-100 dark:border-slate-800">
-            <Avatar email={activeEmail} size={36} />
+            <Avatar email={profile.email} size={36} />
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-slate-500">
-                {t("profileActiveLabel")}
-              </div>
-              <div className="text-sm font-medium truncate">{activeEmail}</div>
+              <div className="text-xs text-slate-500">{t("profileActiveLabel")}</div>
+              <div className="text-sm font-medium truncate">{profile.email}</div>
             </div>
           </div>
 
-          {others.length > 0 && !adding && (
-            <div className="py-1">
-              <div className="px-3 pt-2 pb-1 text-xs text-slate-500">
-                {t("profileSwitchTo")}
-              </div>
-              {others.map((p) => (
-                <button
-                  key={p.email}
-                  type="button"
-                  onClick={() => {
-                    signIn(p.email);
-                    setOpen(false);
-                  }}
-                  className="w-full px-3 py-2 flex items-center gap-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-left"
-                  role="menuitem"
-                >
-                  <Avatar email={p.email} size={24} />
-                  <span className="text-sm truncate flex-1">{p.email}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="border-t border-slate-100 dark:border-slate-800">
-            {adding ? (
-              <form onSubmit={onAddSubmit} className="p-3 space-y-2">
-                <input
-                  type="email"
-                  inputMode="email"
-                  autoFocus
-                  placeholder="email@example.com"
-                  value={draft}
-                  onChange={(e) => {
-                    setDraft(e.target.value);
-                    if (err) setErr(null);
-                  }}
-                  className={`w-full rounded-lg border px-2.5 py-2 text-sm outline-none bg-white dark:bg-slate-900 ${
-                    err
-                      ? "border-rose-400"
-                      : "border-slate-200 dark:border-slate-700 focus:border-brand-500"
-                  }`}
-                />
-                {err && <p className="text-xs text-rose-500">{err}</p>}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAdding(false);
-                      setDraft("");
-                      setErr(null);
-                    }}
-                    className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                  >
-                    {t("back")}
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 rounded-lg bg-brand-600 hover:bg-brand-700 text-white py-1.5 text-sm font-medium"
-                  >
-                    {t("authContinue")}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setAdding(true)}
-                className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800/50 flex items-center gap-2"
-                role="menuitem"
-              >
-                <span className="w-6 h-6 rounded-full border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-slate-400">
-                  +
-                </span>
-                {t("profileAddAnother")}
-              </button>
-            )}
-          </div>
-
-          <div className="border-t border-slate-100 dark:border-slate-800">
+          <div>
             <button
               type="button"
-              onClick={() => {
-                signOut();
+              onClick={async () => {
+                await signOut();
                 setOpen(false);
               }}
               className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800/50"
@@ -223,9 +120,9 @@ function ProfileMenu() {
             </button>
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 if (window.confirm(t("profileDeleteConfirm"))) {
-                  deleteProfile(activeEmail!);
+                  await deleteAccount();
                   setOpen(false);
                 }
               }}

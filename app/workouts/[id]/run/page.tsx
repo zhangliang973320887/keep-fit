@@ -64,24 +64,34 @@ export default function RunPage({ params }: { params: { id: string } }) {
 
   // Load workout + settings on mount
   useEffect(() => {
-    const w = getWorkout(params.id);
-    if (!w) {
-      router.replace("/workouts");
-      return;
-    }
-    setWorkout(w);
-    setSettingsState(getSettings());
-    startedAtRef.current = Date.now();
-    // Async-load full exercise data so we have muscle info for highlighting
-    loadExercises()
-      .then((all) => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [w, s] = await Promise.all([getWorkout(params.id), getSettings()]);
+        if (cancelled) return;
+        if (!w) {
+          router.replace("/workouts");
+          return;
+        }
+        setWorkout(w);
+        setSettingsState(s);
+        startedAtRef.current = Date.now();
+      } catch {
+        if (!cancelled) router.replace("/workouts");
+        return;
+      }
+      // Async-load full exercise data so we have muscle info for highlighting
+      try {
+        const all = await loadExercises();
+        if (cancelled) return;
         const map: Record<string, Exercise> = {};
         for (const e of all) map[e.id] = e;
         setExerciseLookup(map);
-      })
-      .catch(() => {
+      } catch {
         /* ignore — degrades to no highlight */
-      });
+      }
+    })();
+    return () => { cancelled = true; };
   }, [params.id, router]);
 
   // Sync mute state with voice setting
@@ -251,7 +261,9 @@ export default function RunPage({ params }: { params: { id: string } }) {
       ),
       completedSets: [...completedSetsRef.current],
     };
-    appendHistory(entry);
+    // Best-effort fire-and-forget. The session UX shouldn't block on the POST,
+    // and ProfileGate handles re-auth if the cookie expired mid-workout.
+    void appendHistory(entry).catch(() => {});
   }, [workout, settings.voiceEnabled, lang, t]);
 
   const finishCurrentSet = useCallback(() => {
@@ -356,7 +368,8 @@ export default function RunPage({ params }: { params: { id: string } }) {
   const updateSettings = (patch: Partial<AppSettings>) => {
     setSettingsState((s) => {
       const next = { ...s, ...patch };
-      saveSettings(next);
+      // Fire-and-forget — settings UI shouldn't block on the PUT.
+      void saveSettings(next).catch(() => {});
       return next;
     });
   };

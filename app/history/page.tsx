@@ -22,7 +22,16 @@ export default function HistoryPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   useEffect(() => {
-    setHistory(getHistory());
+    let cancelled = false;
+    (async () => {
+      try {
+        const h = await getHistory();
+        if (!cancelled) setHistory(h);
+      } catch {
+        /* swallow — gate handles unauthenticated */
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const fmtDuration = (seconds: number): string => {
@@ -43,9 +52,9 @@ export default function HistoryPage() {
     };
   }, [history]);
 
-  const onClear = () => {
+  const onClear = async () => {
     if (!confirm(t("confirmClearHistory"))) return;
-    clearHistory();
+    await clearHistory();
     setHistory([]);
   };
 

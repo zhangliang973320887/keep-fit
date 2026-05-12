@@ -13,11 +13,25 @@ export default function HomePage() {
   const [now, setNow] = useState<number>(() => Date.now());
 
   useEffect(() => {
-    setWorkouts(getWorkouts());
-    setHistory(getHistory());
+    let cancelled = false;
+    (async () => {
+      try {
+        const [w, h] = await Promise.all([getWorkouts(), getHistory()]);
+        if (!cancelled) {
+          setWorkouts(w);
+          setHistory(h);
+        }
+      } catch {
+        // Most likely not signed in / network blip — ProfileGate handles auth,
+        // so we just leave the page empty.
+      }
+    })();
     // re-tick "X 分钟前" labels once a minute
     const id = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(id);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   // ---- derived stats ----

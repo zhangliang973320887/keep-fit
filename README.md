@@ -1,49 +1,106 @@
 # Keep Fit
 
-一个极简、无登录、无广告的训练记录应用 —— 灵感来自 [workout.cool](https://github.com/Snouzy/workout-cool)，但只保留核心功能。
+一个极简、无广告的训练记录应用 —— 灵感来自 [workout.cool](https://github.com/Snouzy/workout-cool)，但只保留核心功能。
 
-A minimal, no-login, no-ads training tracker — inspired by workout.cool, stripped down to just the core training functionality.
+A minimal, no-ads training tracker — inspired by workout.cool, stripped down to just the core training functionality.
 
 ## 功能 / Features
 
-- 📚 **动作库浏览** — 来自 [wger 公共 API](https://wger.de/) 的几百个动作，含图片、肌群、器械标签
+- 📚 **动作库浏览** — 来自 [free-exercise-db](https://github.com/yuhonas/free-exercise-db) 的 873 个动作，含图片、肌群、器械标签
 - 📝 **自建训练计划** — 选动作、配组数/次数(或时长)/休息
 - ⏱️ **训练执行 / 计时器** — 全屏引导，每组结束自动进入休息倒计时，按时间动作自动切换
-- 📈 **历史记录** — 总次数、总时长、本周次数；所有数据 100% 存在浏览器 `localStorage`
+- 📈 **历史记录** — 总次数、总时长、本周次数；服务器存储，跨设备同步
+- 🔐 **邮箱注册登录** — 邮箱+密码，JWT cookie，数据隔离
 - 🌐 **中英双语** — 右上角随时切换
+
+## 架构 / Architecture
+
+前后端分离，部署在同一台 VPS，Nginx 路由：
+
+```
+[Browser]
+   ↓ HTTPS
+[Nginx]
+   ├── /          → Next.js 前端（PM2 / port 3000）
+   ├── /api/*     → Go 后端（PM2 / port 8080）
+   └── /_next/*   → Next.js 静态资源
+                       ↓
+                   SQLite (./data/keep-fit.db)
+```
 
 ## 技术栈 / Stack
 
+**前端**
 - Next.js 14 (App Router) + TypeScript
 - Tailwind CSS
-- localStorage（无后端，无数据库，无登录）
-- wger.de v2 API（仅读取，无需 key）
+- PWA: manifest + service worker
+
+**后端**
+- Go 1.22 + Chi router
+- modernc.org/sqlite（纯 Go，无 cgo）
+- bcrypt 哈希密码 + golang-jwt v5
+- httpOnly JWT cookie
+
+**动作数据源**
+- [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (MIT, 873 个动作)，前端走 jsDelivr CDN 直接拉取并缓存
 
 ## 开发 / Development
 
+需要本机装 **Node 18+** 和 **Go 1.22+**。
+
 ```bash
+# 一次性装依赖
 npm install
-npm run dev      # http://localhost:3000
-npm run build    # 生产构建
-npm start        # 跑生产构建
+cd backend && go mod download && cd ..
+
+# 后端 (port 8080)
+cd backend
+JWT_SECRET=$(openssl rand -hex 32) go run .
+# 默认 SQLite 在 ./data/keep-fit.db
+
+# 前端 (port 3000)
+npm run dev
+# 默认开发会请求 http://localhost:3000/api/*，需要让前端转发到 8080：
+# 可以临时在 next.config.js 加 rewrites，或者用 nginx/caddy 本地反代。
+# 简化做法：直接 export NEXT_PUBLIC_API_BASE=http://localhost:8080 然后跑 npm run dev
+```
+
+后端跑测试：
+
+```bash
+cd backend
+go test ./...
 ```
 
 ## 数据说明 / Data notes
 
-- 第一次打开 `/exercises` 会从 wger.de 加载约 600 个动作，缓存 7 天
-- 训练计划和历史只存在你这台浏览器里。换浏览器/清缓存就没了
-- 想换数据源（自带数据集 / 自己写 JSON）只需改 `lib/wger.ts` 里的 `loadExercises()`
+- 第一次打开 `/exercises` 会从 jsDelivr 拉 873 个动作的元数据，缓存 7 天（前端 localStorage）
+- 训练计划、历史、设置：存在后端 SQLite，**跟着账号走，换设备能看到**
+- 语言偏好 / 动作库缓存：留在浏览器 localStorage（这些不是个人数据）
+- 想换动作库数据源：改 `lib/free-exercise-db.ts`
 
 ## 用户隔离 / Profiles
 
-进入 app 第一件事会让你输入邮箱。**没有后端、没有密码、不会发邮件**——邮箱只是一个本地"档案名"，
-用来在同一台设备上区分不同人的训练计划和历史。
+邮箱 + 密码注册登录，JWT cookie 会话。
 
-- 数据按邮箱 namespace 存储：`mwc.workouts.v1::alice@x.com` / `mwc.history.v1::alice@x.com` / `mwc.settings.v1::alice@x.com`
-- 右上角头像点开可以切档案 / 加新档案 / 退出登录 / 删除当前档案的所有数据
-- 语言偏好（中/英）保持全局，不分账户
-- 升级前已有的训练计划/历史会自动迁移到**第一个**登录的邮箱
-- 实现都在 `lib/profile.ts` + `components/ProfileGate.tsx` + `components/ProfileProvider.tsx`
+- **注册** `POST /api/auth/register` `{email, password}` → 创建 user + 自动登录
+- **登录** `POST /api/auth/login` `{email, password}` → 验证密码 + 下发 JWT cookie
+- **登出** `POST /api/auth/logout` → 清掉 cookie
+- **当前用户** `GET /api/auth/me` → 返回 `{email, createdAt}`
+- **删账号** `DELETE /api/auth/account` → 同时清空该用户所有训练计划+历史+设置（外键 ON DELETE CASCADE）
+
+密码用 **bcrypt cost=12** 哈希。Cookie 是 `HttpOnly + SameSite=Lax`，前端 JS 看不到 token。
+
+**数据库结构**（`backend/migrations/0001_init.sql`）：
+
+```
+users (id, email, password_hash, created_at)
+workouts (id, user_id, client_id, name, exercises[json], created_at, updated_at, UNIQUE(user_id,client_id))
+history  (id, user_id, client_id, workout_id, workout_name, started_at, completed_at, duration_seconds, completed_sets[json])
+settings (user_id PK, data[json])
+```
+
+**老数据迁移**：升级前在浏览器 localStorage 里的训练计划/历史，第一次注册或登录后会通过 `POST /api/migrate` 自动上传到服务器，然后清掉本地。一次性，由 `mwc.server_migrated.v1` 标志守护。
 
 ## 加更多动作的中文翻译 / Adding more ZH translations
 
@@ -167,7 +224,8 @@ nginx.conf.example        Nginx 反向代理示例
 
 ## 部署到 Linux VPS / Deploy to Linux VPS
 
-> 已经准备好了 PM2 + 三个一键脚本。前提：服务器上有 Node 18+ 和 git。
+> PM2 管两个进程（前端 Next.js + 后端 Go），Nginx 做 80/443 反代和分流。
+> 前提：服务器上有 git，其余（Node / Go / PM2）`deploy.sh` 会自动装。
 
 ### 第一次部署
 
@@ -181,13 +239,16 @@ cd ~/keep-fit
 ```
 
 脚本会：
-1. 检查 Node 版本（< 18 直接拒绝并告诉你怎么装）
-2. 没 PM2 自动 `npm install -g pm2`
-3. `npm ci` 干净装依赖
-4. `npm run build` 生产构建
-5. `pm2 start ecosystem.config.js` 起进程，存到 `pm2 save`
+1. 检查/安装 Node 18+（CentOS 7 走 glibc-217 兜底）
+2. 检查/安装 Go 1.22+（官方 tarball + golang.google.cn 镜像兜底）
+3. 没 PM2 自动 `npm install -g pm2`
+4. `npm ci && npm run build` 干净构建前端
+5. `cd backend && go build` 编译后端二进制 `backend/keep-fit-api`
+6. 生成 `.env.jwt`（如未提供 `JWT_SECRET`），权限 600
+7. `pm2 start ecosystem.config.js` 起两个进程，`pm2 save`
 
-跑完应用就在 `http://localhost:3000`。
+跑完前端在 `http://localhost:3000`，后端在 `http://localhost:8080/api/health`。
+Nginx 配好后用户只看到 `https://yourdomain` 一个口子，`/api/*` 自动落到后端。
 
 ### 开机自启
 
@@ -212,14 +273,27 @@ cd ~/keep-fit
 ### 常用 PM2 命令
 
 ```bash
-pm2 status keep-fit         # 看状态
-pm2 logs keep-fit           # 实时日志
-pm2 logs keep-fit --lines 200
-pm2 restart keep-fit        # 强制重启
-pm2 stop keep-fit           # 停掉
-pm2 delete keep-fit         # 卸载
-pm2 monit                   # 类似 htop 的实时监控
+pm2 status                          # 看两个进程状态
+pm2 logs                            # 看全部日志
+pm2 logs keep-fit                   # 只看前端
+pm2 logs keep-fit-api               # 只看后端
+pm2 restart keep-fit-api            # 重启后端
+pm2 reload ecosystem.config.js      # 零停机重载全部
+pm2 monit                           # 类似 htop 的实时监控
 ```
+
+### 后端环境变量
+
+写在 `ecosystem.config.js` 的 `keep-fit-api` env，或者用 wrapper script。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PORT` | `8080` | HTTP 监听端口 |
+| `DB_PATH` | `./data/keep-fit.db` | SQLite 文件路径 |
+| `JWT_SECRET` | （随机生成 + 警告） | 32+ 字符 |
+| `JWT_TTL_DAYS` | `30` | cookie 有效期 |
+| `COOKIE_SECURE` | `true` | 生产必开（要走 HTTPS） |
+| `COOKIE_SAMESITE` | `lax` | `lax` / `strict` / `none` |
 
 ### 日志轮转
 
